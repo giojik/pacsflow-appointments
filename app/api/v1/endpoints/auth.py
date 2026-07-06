@@ -1,0 +1,213 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime, timedelta
+import threading
+from app.db.session import get_db
+from app.models.user import User, UserRole, AuthProvider
+from app.models.tenant import Tenant
+from app.core.security import verify_password, hash_password, create_access_token
+from app.core.auth import get_current_active_user, require_superadmin
+from app.core.config import settings
+
+router = APIRouter()
+
+# ── Brute force protection ────────────────────────────────────────────────
+_failed_attempts: dict = {}
+_lock = threading.Lock()
+
+def check_brute_force(username: str) -> None:
+    with _lock:
+        now = datetime.utcnow()
+        attempts = _failed_attempts.get(username, {"count": 0, "blocked_until": None})
+        if attempts["blocked_until"] and now < attempts["blocked_until"]:
+            remaining = int((attempts["blocked_until"] - now).total_seconds() / 60) + 1
+            raise HTTPException(429, f"მომხმარებელი დაბლოკილია. სცადეთ {remaining} წუთში.")
+
+def record_failed(username: str) -> None:
+    with _lock:
+        now = datetime.utcnow()
+        attempts = _failed_attempts.get(username, {"count": 0, "blocked_until": None})
+        attempts["count"] += 1
+        if attempts["count"] >= 5:
+            attempts["blocked_until"] = now + timedelta(minutes=15)
+            attempts["count"] = 0
+        _failed_attempts[username] = attempts
+
+def record_success(username: str) -> None:
+    with _lock:
+        _failed_attempts.pop(username, None)
+
+# ── schemas ───────────────────────────────────────────────────────────────
+class TokenOut(BaseModel):
+    access_token: str
+    token_type:   str = "bearer"
+    user_id:      str
+    username:     str
+    role:         str
+    tenant_id:    Optional[str]
+    full_name:    Optional[str]
+
+class UserCreate(BaseModel):
+    username:    str
+    password:    Optional[str] = None
+    email:       Optional[str] = None
+    full_name:   Optional[str] = None
+    role:        UserRole = UserRole.viewer
+    tenant_id:   Optional[str] = None
+    provider_id: Optional[str] = None
+
+class UserOut(BaseModel):
+    id:            str
+    username:      str
+    email:         Optional[str]
+    full_name:     Optional[str]
+    role:          UserRole
+    auth_provider: AuthProvider
+    active:        bool
+    tenant_id:     Optional[str]
+    provider_id:   Optional[str]
+
+    class Config:
+        from_attributes = True
+
+class UserUpdate(BaseModel):
+    email:       Optional[str] = None
+    full_name:   Optional[str] = None
+    role:        Optional[UserRole] = None
+    active:      Optional[bool] = None
+    provider_id: Optional[str] = None
+    password:    Optional[str] = None
+
+# ── login ─────────────────────────────────────────────────────────────────
+@router.post("/login", response_model=TokenOut)
+def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    check_brute_force(form.username)
+
+    user = db.query(User).filter(
+        User.username == form.username,
+        User.auth_provider == AuthProvider.local,
+        User.active == True,
+    ).first()
+
+    if user and user.hashed_password and verify_password(form.password, user.hashed_password):
+        record_success(form.username)
+
+    elif settings.LDAP_ENABLED:
+        from app.services.ldap_auth import ldap_authenticate, sync_ldap_user
+        ldap_user = ldap_authenticate(form.username, form.password)
+        if not ldap_user:
+            record_failed(form.username)
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
+        tenant = db.query(Tenant).filter(Tenant.slug == settings.TENANT_SLUG).first()
+        user = sync_ldap_user(ldap_user, db, tenant.id if tenant else None)
+
+    else:
+        record_failed(form.username)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
+
+    token = create_access_token({"sub": user.id, "role": user.role, "tenant_id": user.tenant_id})
+    return TokenOut(
+        access_token=token,
+        user_id=user.id,
+        username=user.username,
+        role=user.role,
+        tenant_id=user.tenant_id,
+        full_name=user.full_name,
+    )
+
+# ── me ────────────────────────────────────────────────────────────────────
+@router.get("/me", response_model=UserOut)
+def me(current_user: User = Depends(get_current_active_user)):
+    return current_user
+
+# ── user management ───────────────────────────────────────────────────────
+@router.get("/users", response_model=list[UserOut])
+def list_users(
+    tenant_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    # superadmin-ს რომელსაც tenant_id=None აქვს — შეუძლია tenant_id param-ით ფილტრი,
+    # ან ყველას ნახვა. tenant-ზე მიბმული ხედავს მხოლოდ თავისს.
+    if current_user.tenant_id:
+        return db.query(User).filter(User.tenant_id == current_user.tenant_id).all()
+    if tenant_id:
+        return db.query(User).filter(User.tenant_id == tenant_id).all()
+    return db.query(User).all()
+
+@router.post("/users", response_model=UserOut, status_code=201)
+def create_user(
+    body: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role not in (UserRole.admin, UserRole.superadmin):
+        raise HTTPException(403, "მხოლოდ admin-ს შეუძლია მომხმარებლის შექმნა")
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(409, "მომხმარებელი უკვე არსებობს")
+
+    # password policy
+    if body.password and len(body.password) < 8:
+        raise HTTPException(400, "პაროლი მინიმუმ 8 სიმბოლო უნდა იყოს")
+
+    user = User(
+        username=body.username,
+        email=body.email,
+        full_name=body.full_name,
+        role=body.role,
+        tenant_id=body.tenant_id or current_user.tenant_id,
+        provider_id=body.provider_id,
+        auth_provider=AuthProvider.local,
+        hashed_password=hash_password(body.password) if body.password else None,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.patch("/users/{user_id}", response_model=UserOut)
+def update_user(
+    user_id: str,
+    body: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if current_user.role not in (UserRole.admin, UserRole.superadmin):
+        raise HTTPException(403, "წვდომა აკრძალულია")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "მომხმარებელი ვერ მოიძებნა")
+
+    for k, v in body.model_dump(exclude_none=True, exclude={"password"}).items():
+        setattr(user, k, v)
+
+    if body.password:
+        if len(body.password) < 8:
+            raise HTTPException(400, "პაროლი მინიმუმ 8 სიმბოლო უნდა იყოს")
+        user.hashed_password = hash_password(body.password)
+        user.auth_provider = AuthProvider.local
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.post("/users/seed-superadmin", status_code=201)
+def seed_superadmin(db: Session = Depends(get_db)):
+    """პირველი გაშვებისას superadmin-ის შექმნა"""
+    existing = db.query(User).filter(User.role == UserRole.superadmin).first()
+    if existing:
+        raise HTTPException(409, "Superadmin უკვე არსებობს")
+    user = User(
+        username="superadmin",
+        hashed_password=hash_password("changeme123"),
+        role=UserRole.superadmin,
+        auth_provider=AuthProvider.local,
+        full_name="Super Admin",
+        active=True,
+    )
+    db.add(user)
+    db.commit()
+    return {"username": "superadmin", "password": "changeme123", "message": "პაროლი შეიცვალე!"}

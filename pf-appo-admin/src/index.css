@@ -1,0 +1,60 @@
+:root {
+  font: 16px/145% system-ui, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.18px;
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  text-align: left;
+  border: none;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4 {
+  font-weight: 500;
+  margin: 0;
+}
+
+p {
+  margin: 0;
+}
+
+nav::-webkit-scrollbar {
+  display: none;
+}
+
+#main-content::-webkit-scrollbar {
+  width: 16px;
+}
+
+#main-content::-webkit-scrollbar-track {
+  background: #e0e0e0;
+}
+
+#main-content::-webkit-scrollbar-thumb {
+  background: #1D9E75;
+  border-radius: 6px;
+  border: 3px solid #e0e0e0;
+}
+
+#main-content::-webkit-scrollbar-thumb:hover {
+  background: #17a068;
+}
+
+* {
+  scrollbar-width: auto;
+  scrollbar-color: #1D9E75 #e0e0e0;
+}

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+.pytest_cache/
+node_modules/
+pf-appo-admin/node_modules/
+.DS_Store
+*.log
+*.swp
+*.swo
+*~
