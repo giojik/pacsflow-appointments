@@ -24,6 +24,7 @@ import PlatformAudit from "./platform/PlatformAudit";
 import PlatformUsers from "./platform/PlatformUsers";
 import PlatformTenantDetail from "./platform/PlatformTenantDetail";
 import PublicBooking from "./pages/PublicBooking";
+import PlatformPricing from "./platform/PlatformPricing";
 
 initDateFormat();
 
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="tenants/:id" element={<PlatformTenantDetail />} />
         <Route path="audit" element={<PlatformAudit />} />
         <Route path="users" element={<PlatformUsers />} />
+        <Route path="pricing" element={<PlatformPricing />} />
       </Route>
 
       <Route path="/app" element={

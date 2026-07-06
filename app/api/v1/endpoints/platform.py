@@ -575,3 +575,35 @@ def tenant_detail(
             "status": STATUS_KA.get(appt.status.value if appt.status else "", ""),
         } for appt, slot, client, provider in recent],
     }
+
+    # ── Platform Settings (pricing, etc.) ─────────────────────────────────────
+@router.get("/settings/{key}")
+def get_platform_setting(
+    key: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_platform_admin),
+):
+    from sqlalchemy import text
+    row = db.execute(text("SELECT value FROM platform_settings WHERE id = :k"), {"k": key}).fetchone()
+    if not row:
+        raise HTTPException(404, f"Setting '{key}' not found")
+    import json
+    return json.loads(row[0])
+
+
+@router.patch("/settings/{key}")
+def update_platform_setting(
+    key: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_platform_admin),
+):
+    from sqlalchemy import text
+    import json
+    val = json.dumps(body, ensure_ascii=False)
+    db.execute(text(
+        "INSERT INTO platform_settings (id, value, updated_at) VALUES (:k, :v, now()) "
+        "ON CONFLICT (id) DO UPDATE SET value = :v, updated_at = now()"
+    ), {"k": key, "v": val})
+    db.commit()
+    return {"updated": True}

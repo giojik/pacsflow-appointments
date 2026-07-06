@@ -33,7 +33,7 @@ async def tenant_middleware(request: Request, call_next):
     try:
         request.state.tenant_slug = resolve_slug_by_host(host, db)
     except Exception:
-        request.state.tenant_slug = "innova"
+        request.state.tenant_slug = "pacsflow"
     finally:
         db.close()
     response = await call_next(request)

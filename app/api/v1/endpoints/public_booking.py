@@ -214,3 +214,12 @@ def public_book(request: Request, body: BookingCreate, db: Session = Depends(get
         "provider": f"{prov.first_name} {prov.last_name}",
         "message": "თქვენი ჯავშანი მიღებულია! დაგიკავშირდებით დასადასტურებლად.",
     }
+
+@router.get("/pricing")
+def public_pricing(db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    import json
+    row = db.execute(text("SELECT value FROM platform_settings WHERE id = 'pricing'")).fetchone()
+    if not row:
+        return {"plans": []}
+    return json.loads(row[0])

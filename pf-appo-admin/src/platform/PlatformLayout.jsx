@@ -10,6 +10,7 @@ const links = [
   { to: "/platform/tenants", label: "კომპანიები", icon: "🏢" },
   { to: "/platform/users", label: "Admins", icon: "👤" },
   { to: "/platform/audit", label: "Audit Log", icon: "📜" },
+  { to: "/platform/pricing", label: "ფასები", icon: "💰" },
 ];
 
 export default function PlatformLayout() {

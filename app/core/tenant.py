@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.models.tenant import Tenant
 
 # fallback — თუ DB-ში domain ვერ მოიძებნა
-DEFAULT_TENANT_SLUG = "innova"
+DEFAULT_TENANT_SLUG = "pacsflow"
 
 
 def resolve_slug_by_host(host: str, db: Session) -> str:
