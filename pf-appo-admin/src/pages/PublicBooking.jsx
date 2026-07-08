@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import api from "../api";
 import { loadBranding } from "../api/branding";
+import { useParams } from "react-router-dom";
 
 export default function PublicBooking() {
+  const { slug } = useParams();
   const [branding, setBranding] = useState({
     app_name: "PacsFlow", app_subtitle: "Appointments",
     primary_color: "#1D9E75", login_bg_color: "#1a1a2e", login_bg_image: "",
@@ -22,7 +24,7 @@ export default function PublicBooking() {
   const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", personal_id: "", notes: "", website: "" });
 
   const formStartTime = useRef(Date.now());
-  const urlTenant = new URLSearchParams(window.location.search).get("tenant");
+  const urlTenant = slug || new URLSearchParams(window.location.search).get("tenant");
 
   useEffect(() => {
     loadBranding().then(b => {

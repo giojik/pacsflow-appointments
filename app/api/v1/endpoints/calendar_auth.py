@@ -1,82 +1,117 @@
 """
-Calendar OAuth endpoints — provider-ი ამ URL-ებით აკავშირებს კალენდარს.
+Calendar OAuth endpoints — platform-level
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.provider import Provider, CalendarProvider
-from app.services.calendar import get_calendar_adapter
-from app.services.calendar.base import CalendarCredentials
-import json, base64
+from app.models.tenant import Tenant
+from app.core.config import settings
+import json, base64, urllib.parse, httpx
 
 router = APIRouter()
+
+def _google_auth_url(state: str) -> str:
+    params = {
+        "client_id":     settings.GOOGLE_CLIENT_ID,
+        "redirect_uri":  settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope":         "https://www.googleapis.com/auth/calendar",
+        "access_type":   "offline",
+        "prompt":        "consent",
+        "state":         state,
+    }
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
+
+def _exchange_code(code: str) -> dict:
+    r = httpx.post("https://oauth2.googleapis.com/token", data={
+        "code":          code,
+        "client_id":     settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+        "redirect_uri":  settings.GOOGLE_REDIRECT_URI,
+        "grant_type":    "authorization_code",
+    }, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def _create_google_calendar(access_token: str, calendar_name: str) -> str:
+    r = httpx.post(
+        "https://www.googleapis.com/calendar/v3/calendars",
+        json={"summary": calendar_name, "timeZone": "Asia/Tbilisi"},
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30
+    )
+    r.raise_for_status()
+    return r.json()["id"]
 
 @router.get("/connect/{provider_type}")
 def start_oauth(
     provider_type: str,
     provider_id: str = Query(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """Provider-ი ამ URL-ზე გადადის კალენდარის დასაკავშირებლად"""
-    if provider_type not in ("google", "outlook"):
-        raise HTTPException(400, f"OAuth მხოლოდ google და outlook-ისთვის. CalDAV-ისთვის გამოიყენეთ /connect/caldav")
-
-    state = base64.b64encode(json.dumps({
+    if provider_type != "google":
+        raise HTTPException(400, "ამჟამად მხოლოდ Google Calendar-ია მხარდაჭერილი")
+    provider = db.query(Provider).filter(Provider.id == provider_id).first()
+    if not provider:
+        raise HTTPException(404, "Provider ვერ მოიძებნა")
+    state = base64.urlsafe_b64encode(json.dumps({
         "provider_id":   provider_id,
         "provider_type": provider_type,
     }).encode()).decode()
+    return RedirectResponse(_google_auth_url(state))
 
-    creds = CalendarCredentials(provider_type=provider_type)
-    adapter = get_calendar_adapter(creds)
-    return RedirectResponse(adapter.get_auth_url(state))
-
-@router.get("/callback/{provider_type}")
+@router.get("/callback")
 def oauth_callback(
-    provider_type: str,
     code: str = Query(...),
     state: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    """Google / Outlook-ი ამ URL-ზე გადამისამართებს auth-ის შემდეგ"""
-    state_data = json.loads(base64.b64decode(state))
+    try:
+        state_data = json.loads(base64.urlsafe_b64decode(state + "=="))
+    except Exception:
+        raise HTTPException(400, "არასწორი state პარამეტრი")
     provider_id = state_data["provider_id"]
-
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
+    try:
+        token_data = _exchange_code(code)
+    except Exception as e:
+        raise HTTPException(400, f"Google token exchange შეცდომა: {e}")
 
-    temp_creds = CalendarCredentials(provider_type=provider_type)
-    adapter = get_calendar_adapter(temp_creds)
-    creds = adapter.exchange_code(code)
+    access_token = token_data["access_token"]
 
-    provider.calendar_provider      = CalendarProvider(provider_type)
-    provider.calendar_id            = creds.calendar_id
-    provider.calendar_refresh_token = creds.refresh_token
+    tenant = db.query(Tenant).filter(Tenant.id == provider.tenant_id).first()
+    tenant_name = tenant.name if tenant else "PacsFlow"
+    provider_name = f"{provider.first_name} {provider.last_name}"
+    calendar_name = f"{tenant_name} — {provider_name}"
+
+    try:
+        calendar_id = _create_google_calendar(access_token, calendar_name)
+    except Exception as e:
+        print(f"[calendar] failed to create calendar, using primary: {e}")
+        calendar_id = "primary"
+
+    provider.calendar_provider      = CalendarProvider.google
+    provider.calendar_id            = calendar_id
+    provider.calendar_refresh_token = token_data.get("refresh_token")
     provider.calendar_sync_enabled  = True
     db.commit()
 
-    return {"status": "ok", "message": f"{provider_type} კალენდარი დაკავშირდა"}
-
-@router.post("/connect/caldav")
-def connect_caldav(
-    provider_id: str,
-    caldav_url: str,
-    username: str,
-    app_password: str,
-    db: Session = Depends(get_db)
-):
-    """CalDAV — username + app-specific password (Apple, Nextcloud, Fastmail)"""
-    provider = db.query(Provider).filter(Provider.id == provider_id).first()
-    if not provider:
-        raise HTTPException(404, "Provider ვერ მოიძებნა")
-
-    provider.calendar_provider      = CalendarProvider.caldav
-    provider.calendar_id            = caldav_url
-    provider.calendar_refresh_token = app_password
-    provider.calendar_sync_enabled  = True
-    db.commit()
-    return {"status": "ok", "message": "CalDAV კალენდარი დაკავშირდა"}
+    return HTMLResponse("""
+    <html><body style="font-family:sans-serif;text-align:center;padding:60px">
+        <h2 style="color:#1D9E75">✅ Google Calendar დაკავშირდა!</h2>
+        <p>ეს ფანჯარა შეგიძლიათ დახუროთ.</p>
+        <script>
+            if (window.opener) {
+                window.opener.postMessage({type:'calendar_connected'}, '*');
+                setTimeout(() => window.close(), 2000);
+            }
+        </script>
+    </body></html>
+    """)
 
 @router.delete("/disconnect/{provider_id}")
 def disconnect_calendar(provider_id: str, db: Session = Depends(get_db)):
@@ -89,3 +124,14 @@ def disconnect_calendar(provider_id: str, db: Session = Depends(get_db)):
     provider.calendar_sync_enabled  = False
     db.commit()
     return {"status": "ok", "message": "კალენდარი გათიშულია"}
+
+@router.get("/status/{provider_id}")
+def calendar_status(provider_id: str, db: Session = Depends(get_db)):
+    provider = db.query(Provider).filter(Provider.id == provider_id).first()
+    if not provider:
+        raise HTTPException(404, "Provider ვერ მოიძებნა")
+    return {
+        "connected": bool(provider.calendar_sync_enabled),
+        "provider_type": provider.calendar_provider.value if provider.calendar_provider else None,
+        "calendar_id": provider.calendar_id,
+    }

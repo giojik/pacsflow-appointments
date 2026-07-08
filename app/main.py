@@ -26,12 +26,12 @@ app.mount("/static", StaticFiles(directory="/app/static"), name="static")
 
 @app.middleware("http")
 async def tenant_middleware(request: Request, call_next):
-    from app.core.tenant import resolve_slug_by_host
+    from app.core.tenant import resolve_slug
     from app.db.session import SessionLocal
     host = request.headers.get("host", "")
     db = SessionLocal()
     try:
-        request.state.tenant_slug = resolve_slug_by_host(host, db)
+        request.state.tenant_slug = resolve_slug(request, db)
     except Exception:
         request.state.tenant_slug = "pacsflow"
     finally:

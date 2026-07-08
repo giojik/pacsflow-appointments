@@ -8,6 +8,7 @@ from app.api.v1.endpoints import waitlist
 from app.api.v1.endpoints import upload
 from app.api.v1.endpoints import reports
 from app.api.v1.endpoints import audit
+from app.api.v1.endpoints import bulk_import
 from app.api.v1.endpoints import platform
 from app.api.v1.endpoints import public_booking
 
@@ -25,5 +26,6 @@ api_router.include_router(waitlist.router, prefix="/waitlist", tags=["waitlist"]
 api_router.include_router(upload.router,   prefix="/upload",   tags=["upload"])
 api_router.include_router(reports.router,  prefix="/reports",  tags=["reports"])
 api_router.include_router(audit.router,    prefix="/audit",    tags=["audit"])
+api_router.include_router(bulk_import.router, tags=["bulk-import"])
 api_router.include_router(platform.router, prefix="/platform", tags=["platform"])
 api_router.include_router(public_booking.router, prefix="/public", tags=["public-booking"])

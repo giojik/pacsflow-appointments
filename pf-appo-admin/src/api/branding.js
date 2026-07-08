@@ -1,6 +1,12 @@
+import { detectPathSlug } from "./index";
+
 export async function loadBranding() {
   try {
-    const response = await fetch("/api/v1/settings/public/branding");
+    const headers = {};
+    const pathSlug = detectPathSlug();
+    if (pathSlug) headers["X-Tenant-Slug"] = pathSlug;
+
+    const response = await fetch("/api/v1/settings/public/branding", { headers });
     const data = await response.json();
     return data;
   } catch {

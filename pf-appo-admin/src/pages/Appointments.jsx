@@ -375,6 +375,7 @@ export default function Appointments() {
   const [view, setView]                 = useState("week");
   const [anchor, setAnchor]             = useState(new Date());
   const [filterProvider, setFilterProvider] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
   const [selectedAppt, setSelectedAppt] = useState(null);
   const [search, setSearch]             = useState("");
   const [searchResults, setSearchResults] = useState(null);
@@ -410,7 +411,7 @@ export default function Appointments() {
     return { from: dates[0].toISOString().slice(0,10), to: dates[dates.length-1].toISOString().slice(0,10) };
   }, [anchor, view, getDates]);
 
-  useEffect(() => { load(); }, [anchor, view, filterProvider]);
+  useEffect(() => { load(); }, [anchor, view, filterProvider, filterStatus]);
 
   const load = async () => {
     setLoading(true);
@@ -420,8 +421,9 @@ export default function Appointments() {
     try {
       const params = { tenant_id: user.tenant_id, date_from: from, date_to: to };
       if (filterProvider) params.provider_id = filterProvider;
+      if (filterStatus) params.status = filterStatus;
       const { data } = await api.get("/appointments/", { params });
-      setAppointments(data);
+      setAppointments(filterStatus ? data : data.filter(a => a.status !== "cancelled"));
     } finally {
       setLoading(false);
     }
@@ -612,6 +614,15 @@ export default function Appointments() {
           style={{ padding:"6px 12px", borderRadius:6, border:"1px solid #ddd", fontSize:13 }}>
           <option value="">ყველა პროვაიდერი</option>
           {providers.map(p => <option key={p.id} value={p.id}>{p.first_name} {p.last_name}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          style={{ padding:"6px 12px", borderRadius:6, border:"1px solid #ddd", fontSize:13 }}>
+          <option value="">ყველა სტატუსი</option>
+          <option value="pending">მოლოდინში</option>
+          <option value="confirmed">დადასტურებული</option>
+          <option value="completed">დასრულებული</option>
+          <option value="cancelled">გაუქმებული</option>
+          <option value="no_show">არ გამოცხადდა</option>
         </select>
         <div style={{ position:"relative" }}>
           <input

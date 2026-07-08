@@ -17,6 +17,7 @@ import { initDateFormat } from "./utils/dateFormat";
 import { setDatePickerFormat } from "./components/DateField";
 import { loadBranding } from "./api/branding";
 import AuditLog from "./pages/AuditLog";
+import BulkImport from "./admin/BulkImport";
 import PlatformLayout from "./platform/PlatformLayout";
 import PlatformDashboard from "./platform/PlatformDashboard";
 import PlatformTenants from "./platform/PlatformTenants";
@@ -25,6 +26,7 @@ import PlatformUsers from "./platform/PlatformUsers";
 import PlatformTenantDetail from "./platform/PlatformTenantDetail";
 import PublicBooking from "./pages/PublicBooking";
 import PlatformPricing from "./platform/PlatformPricing";
+import PlatformContacts from "./platform/PlatformContacts";
 
 initDateFormat();
 
@@ -46,6 +48,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<PublicBooking />} />
+      <Route path="/b/:slug" element={<PublicBooking />} />
       <Route path="/platform" element={
         <ProtectedRoute>
           <PlatformLayout />
@@ -57,6 +60,7 @@ export default function App() {
         <Route path="audit" element={<PlatformAudit />} />
         <Route path="users" element={<PlatformUsers />} />
         <Route path="pricing" element={<PlatformPricing />} />
+        <Route path="contacts" element={<PlatformContacts />} />
       </Route>
 
       <Route path="/app" element={
@@ -76,6 +80,7 @@ export default function App() {
         <Route path="waitlist" element={<Waitlist />} />
         <Route path="reports" element={<Reports />} />
         <Route path="audit" element={<AuditLog />} />
+        <Route path="import" element={<BulkImport />} />
       </Route>
       <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>

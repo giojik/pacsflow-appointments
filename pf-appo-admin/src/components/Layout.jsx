@@ -87,6 +87,7 @@ export default function Layout() {
     { to: "/app/reports", label: "ანგარიშები", icon: "📊", roles: ["superadmin", "admin", "provider"] },
     { to: "/app/audit", label: "Audit Log", icon: "📜", roles: ["superadmin", "admin"] },
     { to: "/app/users", label: "მომხმარებლები", icon: "🔐", roles: ["superadmin", "admin"] },
+    { to: "/app/import", label: "იმპორტი", icon: "📥", roles: ["superadmin", "admin"] },
     { to: "/app/settings", label: "პარამეტრები", icon: "⚙️", roles: ["superadmin", "admin"] },
   ].filter(l => l.roles.includes(user?.role));
 

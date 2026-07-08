@@ -50,6 +50,7 @@ class TokenOut(BaseModel):
     tenant_id:    Optional[str]
     full_name:    Optional[str]
 
+    provider_id:  Optional[str] = None
 class UserCreate(BaseModel):
     username:    str
     password:    Optional[str] = None
@@ -116,6 +117,7 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
         role=user.role,
         tenant_id=user.tenant_id,
         full_name=user.full_name,
+        provider_id=user.provider_id,
     )
 
 # ── me ────────────────────────────────────────────────────────────────────

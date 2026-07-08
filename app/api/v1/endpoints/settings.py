@@ -50,11 +50,11 @@ def update_settings(tenant_id: str, body: SettingsUpdate,
 @router.get("/public/branding")
 def get_public_branding(request: Request, db: Session = Depends(get_db)):
     """Public endpoint — authorization გარეშე, დომეინის მიხედვით"""
-    from app.core.tenant import resolve_slug_by_host
+    from app.core.tenant import resolve_slug
     from app.models.tenant import Tenant
     from fastapi import Request
-    host = request.headers.get("host", "")
-    slug = resolve_slug_by_host(host, db)
+    # host-ს აღარ ვკითხულობთ პირდაპირ — resolve_slug რაც უფრო რთულ ლოგიკას აერთიანებს
+    slug = resolve_slug(request, db)
     tenant = db.query(Tenant).filter(Tenant.slug == slug).first()
     if not tenant:
         return {}

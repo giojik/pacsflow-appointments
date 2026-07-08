@@ -48,5 +48,5 @@ def delete_service(service_id: str, db: Session = Depends(get_db)):
     s = db.query(Service).filter(Service.id == service_id).first()
     if not s:
         raise HTTPException(404, "სერვისი ვერ მოიძებნა")
-    s.active = False
+    db.delete(s)
     db.commit()

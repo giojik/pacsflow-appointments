@@ -7,6 +7,7 @@ export default function Services() {
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ code: "", name_ka: "", name_en: "", duration_min: 30, color: "#1D9E75" });
   const [saving, setSaving] = useState(false);
 
@@ -14,28 +15,46 @@ export default function Services() {
     try {
       const { data } = await api.get("/services/", { params: { tenant_id: user.tenant_id } });
       setServices(data);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
+
+  const resetForm = () => {
+    setForm({ code: "", name_ka: "", name_en: "", duration_min: 30, color: "#1D9E75" });
+    setEditId(null);
+    setShowForm(false);
+  };
+
+  const startEdit = (s) => {
+    setForm({ code: s.code, name_ka: s.name_ka, name_en: s.name_en || "", duration_min: s.duration_min, color: s.color || "#1D9E75" });
+    setEditId(s.id);
+    setShowForm(true);
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await api.post("/services/", { ...form, tenant_id: user.tenant_id, duration_min: Number(form.duration_min) });
-      setShowForm(false);
-      setForm({ code: "", name_ka: "", name_en: "", duration_min: 30, color: "#1D9E75" });
+      const payload = { ...form, duration_min: Number(form.duration_min) };
+      if (editId) {
+        await api.patch(`/services/${editId}`, payload);
+      } else {
+        await api.post("/services/", { ...payload, tenant_id: user.tenant_id });
+      }
+      resetForm();
       load();
-    } catch (e) {
-      alert("შეცდომა: " + e.message);
-    } finally {
-      setSaving(false);
-    }
+    } catch (e) { alert("შეცდომა: " + (e.response?.data?.detail || e.message)); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (s) => {
+    if (!confirm(`წაიშალოს "${s.name_ka}"?`)) return;
+    try {
+      await api.delete(`/services/${s.id}`);
+      load();
+    } catch (e) { alert("შეცდომა: " + (e.response?.data?.detail || e.message)); }
   };
 
   const toggleActive = async (s) => {
@@ -46,64 +65,53 @@ export default function Services() {
   if (loading) return <p>იტვირთება...</p>;
 
   const inp = { padding:"8px 12px", borderRadius:6, border:"1px solid #ddd", fontSize:14, width:"100%", boxSizing:"border-box" };
+  const btnSm = (bg) => ({ background:bg, color:"#fff", border:"none", padding:"6px 12px", borderRadius:6, cursor:"pointer", fontSize:13 });
 
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
         <h2 style={{ margin:0 }}>სერვისები</h2>
-        <button onClick={() => setShowForm(!showForm)} style={{
-          background:"#1D9E75", color:"#fff", border:"none",
-          padding:"8px 16px", borderRadius:8, cursor:"pointer"
+        <button onClick={() => { if (showForm) resetForm(); else setShowForm(true); }} style={{
+          background:"#1D9E75", color:"#fff", border:"none", padding:"8px 16px", borderRadius:8, cursor:"pointer"
         }}>
           {showForm ? "გაუქმება" : "+ დამატება"}
         </button>
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} style={{
-          background:"#fff", padding:20, borderRadius:12, marginBottom:20
-        }}>
+        <form onSubmit={handleSubmit} style={{ background:"#fff", padding:20, borderRadius:12, marginBottom:20 }}>
+          <div style={{ fontSize:15, fontWeight:600, marginBottom:12 }}>{editId ? "✏️ შესწორება" : "➕ ახალი სერვისი"}</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:12 }}>
             <div>
               <label style={{ fontSize:12, color:"#666", display:"block", marginBottom:4 }}>კოდი *</label>
-              <input placeholder="CONSULT" required value={form.code}
-                onChange={e => setForm({...form, code: e.target.value.toUpperCase()})}
-                style={inp} />
+              <input placeholder="CONSULT" required value={form.code} onChange={e => setForm({...form, code: e.target.value.toUpperCase()})} style={inp} disabled={!!editId} />
             </div>
             <div>
               <label style={{ fontSize:12, color:"#666", display:"block", marginBottom:4 }}>სახელი (ქართ.) *</label>
-              <input placeholder="კონსულტაცია" required value={form.name_ka}
-                onChange={e => setForm({...form, name_ka: e.target.value})}
-                style={inp} />
+              <input placeholder="კონსულტაცია" required value={form.name_ka} onChange={e => setForm({...form, name_ka: e.target.value})} style={inp} />
             </div>
             <div>
               <label style={{ fontSize:12, color:"#666", display:"block", marginBottom:4 }}>სახელი (ინგლ.)</label>
-              <input placeholder="Consultation" value={form.name_en}
-                onChange={e => setForm({...form, name_en: e.target.value})}
-                style={inp} />
+              <input placeholder="Consultation" value={form.name_en} onChange={e => setForm({...form, name_en: e.target.value})} style={inp} />
             </div>
             <div>
               <label style={{ fontSize:12, color:"#666", display:"block", marginBottom:4 }}>ხანგრძლივობა (წთ)</label>
-              <input type="number" min="5" max="480" value={form.duration_min}
-                onChange={e => setForm({...form, duration_min: e.target.value})}
-                style={{...inp, maxWidth:120}} />
+              <input type="number" min="5" max="480" value={form.duration_min} onChange={e => setForm({...form, duration_min: e.target.value})} style={{...inp, maxWidth:120}} />
             </div>
             <div>
               <label style={{ fontSize:12, color:"#666", display:"block", marginBottom:4 }}>ფერი</label>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <input type="color" value={form.color}
-                  onChange={e => setForm({...form, color: e.target.value})}
-                  style={{ width:40, height:36, border:"none", cursor:"pointer", borderRadius:6 }} />
+                <input type="color" value={form.color} onChange={e => setForm({...form, color: e.target.value})} style={{ width:40, height:36, border:"none", cursor:"pointer", borderRadius:6 }} />
                 <span style={{ fontSize:13, color:"#666" }}>{form.color}</span>
               </div>
             </div>
           </div>
-          <button type="submit" disabled={saving} style={{
-            background:"#1D9E75", color:"#fff", border:"none",
-            padding:"10px 24px", borderRadius:8, cursor:"pointer", fontSize:14
-          }}>
-            {saving ? "ინახება..." : "შენახვა"}
-          </button>
+          <div style={{ display:"flex", gap:10 }}>
+            <button type="submit" disabled={saving} style={{ background:"#1D9E75", color:"#fff", border:"none", padding:"10px 24px", borderRadius:8, cursor:"pointer", fontSize:14 }}>
+              {saving ? "ინახება..." : editId ? "განახლება" : "შენახვა"}
+            </button>
+            {editId && <button type="button" onClick={resetForm} style={{ background:"#6b7280", color:"#fff", border:"none", padding:"10px 24px", borderRadius:8, cursor:"pointer", fontSize:14 }}>გაუქმება</button>}
+          </div>
         </form>
       )}
 
@@ -119,17 +127,15 @@ export default function Services() {
             <div>
               <div style={{ fontWeight:"bold", fontSize:16 }}>{s.name_ka}</div>
               {s.name_en && <div style={{ color:"#666", fontSize:13 }}>{s.name_en}</div>}
-              <div style={{ color:"#999", fontSize:12, marginTop:4 }}>
-                კოდი: <b>{s.code}</b> · ⏱ {s.duration_min} წთ
-              </div>
+              <div style={{ color:"#999", fontSize:12, marginTop:4 }}>კოდი: <b>{s.code}</b> · ⏱ {s.duration_min} წთ</div>
             </div>
-            <button onClick={() => toggleActive(s)} style={{
-              background: s.active ? "#e74c3c" : "#1D9E75",
-              color:"#fff", border:"none", padding:"6px 14px",
-              borderRadius:6, cursor:"pointer", fontSize:13
-            }}>
-              {s.active ? "დეაქტივაცია" : "აქტივაცია"}
-            </button>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => startEdit(s)} style={btnSm("#3b82f6")}>✏️</button>
+              <button onClick={() => handleDelete(s)} style={btnSm("#ef4444")}>🗑️</button>
+              <button onClick={() => toggleActive(s)} style={btnSm(s.active ? "#f59e0b" : "#1D9E75")}>
+                {s.active ? "⏸" : "▶"}
+              </button>
+            </div>
           </div>
         ))}
       </div>

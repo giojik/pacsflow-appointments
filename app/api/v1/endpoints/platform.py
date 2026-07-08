@@ -26,6 +26,7 @@ class TenantCreate(BaseModel):
     name: str
     slug: str
     domains: str = ""
+    path_slug: str = ""
     timezone: str = "Asia/Tbilisi"
     admin_username: str | None = None
     admin_password: str | None = None
@@ -35,6 +36,7 @@ class TenantCreate(BaseModel):
 class TenantUpdate(BaseModel):
     name: str | None = None
     domains: str | None = None
+    path_slug: str | None = None
     timezone: str | None = None
     active: bool | None = None
 
@@ -57,6 +59,7 @@ def list_tenants(
             "name": t.name,
             "slug": t.slug,
             "domains": t.domains or "",
+            "path_slug": t.path_slug or "",
             "timezone": t.timezone,
             "active": bool(t.active),
             "created_at": t.created_at.strftime("%Y-%m-%d") if t.created_at else "",
@@ -87,6 +90,7 @@ def create_tenant(
         name=body.name.strip(),
         slug=slug,
         domains=body.domains.strip(),
+        path_slug=body.path_slug.strip() if body.path_slug else None,
         timezone=body.timezone or "Asia/Tbilisi",
         active=True,
     )
@@ -116,6 +120,7 @@ def create_tenant(
     return {
         "id": tenant.id, "name": tenant.name, "slug": tenant.slug,
         "domains": tenant.domains, "active": True, "admin_created": admin_created,
+        "path_slug": tenant.path_slug or "",
     }
 
 
@@ -134,6 +139,8 @@ def update_tenant(
         t.name = body.name.strip()
     if body.domains is not None:
         t.domains = body.domains.strip()
+    if body.path_slug is not None:
+        t.path_slug = body.path_slug.strip() or None
     if body.timezone is not None:
         t.timezone = body.timezone
     if body.active is not None:
@@ -546,6 +553,7 @@ def tenant_detail(
         "tenant": {
             "id": t.id, "name": t.name, "slug": t.slug,
             "domains": t.domains or "", "timezone": t.timezone,
+            "path_slug": t.path_slug or "",
             "active": bool(t.active),
             "created_at": t.created_at.strftime("%Y-%m-%d") if t.created_at else "",
         },
@@ -605,5 +613,35 @@ def update_platform_setting(
         "INSERT INTO platform_settings (id, value, updated_at) VALUES (:k, :v, now()) "
         "ON CONFLICT (id) DO UPDATE SET value = :v, updated_at = now()"
     ), {"k": key, "v": val})
+    db.commit()
+    return {"updated": True}
+@router.get("/contacts")
+def list_contacts(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_platform_admin),
+):
+    from sqlalchemy import text
+    rows = db.execute(text(
+        "SELECT id, plan, first_name, last_name, company, phone, email, message, status, created_at "
+        "FROM contact_requests ORDER BY created_at DESC LIMIT 200"
+    )).fetchall()
+    return [{
+        "id": str(r[0]), "plan": r[1] or "", "first_name": r[2] or "", "last_name": r[3] or "",
+        "company": r[4] or "", "phone": r[5] or "", "email": r[6] or "", "message": r[7] or "",
+        "status": r[8] or "new",
+        "created_at": r[9].strftime("%Y-%m-%d %H:%M") if r[9] else "",
+    } for r in rows]
+
+
+@router.patch("/contacts/{contact_id}")
+def update_contact(
+    contact_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_platform_admin),
+):
+    from sqlalchemy import text
+    status = body.get("status", "new")
+    db.execute(text("UPDATE contact_requests SET status = :s WHERE id = :id::uuid"), {"s": status, "id": contact_id})
     db.commit()
     return {"updated": True}

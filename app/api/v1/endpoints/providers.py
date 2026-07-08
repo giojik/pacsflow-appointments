@@ -61,5 +61,6 @@ def delete_provider(provider_id: str, db: Session = Depends(get_db)):
     p = db.query(Provider).filter(Provider.id == provider_id).first()
     if not p:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
-    p.active = False
+    db.query(ProviderService).filter(ProviderService.provider_id == provider_id).delete()
+    db.delete(p)
     db.commit()

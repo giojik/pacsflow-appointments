@@ -10,6 +10,17 @@ from app.schemas.appointment import AppointmentCreate, AppointmentUpdate, Appoin
 
 router = APIRouter()
 
+def _calendar_sync(appt: Appointment, db: Session, action: str = "sync"):
+    """Calendar sync — background, არ აჩერებს flow-ს შეცდომისას"""
+    try:
+        from app.services.calendar.service import calendar_service
+        if action == "sync":
+            calendar_service.sync_appointment(appt, db)
+        elif action == "delete":
+            calendar_service.delete_appointment_event(appt, db)
+    except Exception as e:
+        print(f"[calendar] {action} error: {e}")
+
 def _enrich(a: Appointment) -> dict:
     d = {c.name: getattr(a, c.name) for c in a.__table__.columns}
     client   = a.client
@@ -109,22 +120,9 @@ def create_appointment(body: AppointmentCreate, db: Session = Depends(get_db)):
     slot.status = SlotStatus.booked
     db.commit()
     db.refresh(appt)
-    return _enrich(appt)
 
- # SMS გაგზავნა
-    try:
-        from app.services.sms import send_sms, build_appointment_sms
-        if settings.SMS_PROVIDER and settings.TWILIO_ACCOUNT_SID:
-            msg = build_appointment_sms(
-                client_name=f"{appt.client.first_name} {appt.client.last_name}",
-                provider_name=f"{appt.slot.provider.first_name} {appt.slot.provider.last_name}",
-                date=slot.starts_at.strftime("%d.%m.%Y"),
-                time=slot.starts_at.strftime("%H:%M"),
-                code=code.code
-            )
-            send_sms(appt.client.phone, msg)
-    except Exception as e:
-        print(f"[SMS] {e}")
+    # Google Calendar sync
+    _calendar_sync(appt, db, "sync")
 
     return _enrich(appt)
 
@@ -139,7 +137,9 @@ def update_appointment(
     if not a:
         raise HTTPException(404, "ჩაწერა ვერ მოიძებნა")
 
-    if body.status == AppointmentStatus.cancelled and a.status != AppointmentStatus.cancelled:
+    is_cancelling = (body.status == AppointmentStatus.cancelled and a.status != AppointmentStatus.cancelled)
+
+    if is_cancelling:
         a.slot.status = SlotStatus.available
         from app.api.v1.endpoints.waitlist import notify_waitlist
         notify_waitlist(a.slot_id, db)
@@ -148,6 +148,13 @@ def update_appointment(
         setattr(a, k, v)
     db.commit()
     db.refresh(a)
+
+    # Calendar: გაუქმებისას event წაიშლება, სხვა შემთხვევაში განახლდება
+    if is_cancelling:
+        _calendar_sync(a, db, "delete")
+    else:
+        _calendar_sync(a, db, "sync")
+
     return _enrich(a)
 
 @router.patch("/{appointment_id}/reschedule", response_model=AppointmentOut)
@@ -170,14 +177,16 @@ def reschedule_appointment(
     if new_slot.status != SlotStatus.available:
         raise HTTPException(409, "სლოტი დაკავებულია")
 
-    # ძველი სლოტი გავათავისუფლოთ
     a.slot.status = SlotStatus.available
-    # ახალი სლოტი დავაჯავშნოთ
     new_slot.status = SlotStatus.booked
     a.slot_id = slot_id
 
     db.commit()
     db.refresh(a)
+
+    # Calendar: ახალი დროით განახლდება
+    _calendar_sync(a, db, "sync")
+
     return _enrich(a)
 
 @router.post("/{appointment_id}/resend-code", response_model=dict)

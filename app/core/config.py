@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480   # 8 საათი
 
     # Tenant
-    TENANT_SLUG: str = "innova"
-    TENANT_NAME: str = "Innova Medical"
+    TENANT_SLUG: str = "pacsflow"
+    TENANT_NAME: str = "Pacs Flow"
     PROVIDER_LABEL: str = "Provider"
     CLIENT_LABEL: str = "Client"
     REQUIRE_PERSONAL_ID: bool = False
@@ -21,12 +21,12 @@ class Settings(BaseSettings):
 
     # LDAP / Active Directory
     LDAP_ENABLED: bool = False
-    LDAP_SERVER: str = ""              # "ldap://dc.innova.local"
+    LDAP_SERVER: str = ""              # "ldap://dc.pacsflow.local"
     LDAP_PORT: int = 389
     LDAP_USE_SSL: bool = False
-    LDAP_BIND_DN: str = ""             # "CN=svc-pacsflow,OU=Services,DC=innova,DC=local"
+    LDAP_BIND_DN: str = ""             # "CN=svc-pacsflow,OU=Services,DC=pacsflow,DC=local"
     LDAP_BIND_PASSWORD: str = ""
-    LDAP_SEARCH_BASE: str = ""         # "DC=innova,DC=local"
+    LDAP_SEARCH_BASE: str = ""         # "DC=pacsflow,DC=local"
     LDAP_USER_FILTER: str = "(sAMAccountName={username})"
     LDAP_ATTR_EMAIL: str = "mail"
     LDAP_ATTR_FULLNAME: str = "displayName"
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Google Calendar
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
+    GOOGLE_REDIRECT_URI: str = ""
 
     # Outlook
     OUTLOOK_CLIENT_ID: str = ""
@@ -105,10 +105,6 @@ def load_settings_from_db(tenant_id: str) -> None:
                 settings.TWILIO_AUTH_TOKEN = data["sms_auth_token"]
 
             # Google Calendar
-            if "google_client_id" in data:
-                settings.GOOGLE_CLIENT_ID = data["google_client_id"]
-            if "google_client_secret" in data:
-                settings.GOOGLE_CLIENT_SECRET = data["google_client_secret"]
 
             # Outlook
             if "outlook_client_id" in data:

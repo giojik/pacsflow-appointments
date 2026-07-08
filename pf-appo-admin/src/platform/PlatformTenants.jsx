@@ -16,7 +16,7 @@ export default function PlatformTenants() {
   const [deleteConfirm, setDeleteConfirm] = useState("");
 
   const [form, setForm] = useState({
-    name: "", slug: "", domains: "",
+    name: "", slug: "", domains: "", path_slug: "",
     admin_username: "", admin_password: "", admin_full_name: "",
   });
 
@@ -40,7 +40,7 @@ export default function PlatformTenants() {
     try {
       await api.post("/platform/tenants", form);
       setShowForm(false);
-      setForm({ name: "", slug: "", domains: "", admin_username: "", admin_password: "", admin_full_name: "" });
+      setForm({ name: "", slug: "", domains: "", path_slug: "", admin_username: "", admin_password: "", admin_full_name: "" });
       load();
     } catch (err) {
       alert("შეცდომა: " + (err.response?.data?.detail || err.message));
@@ -147,6 +147,10 @@ export default function PlatformTenants() {
                 <label style={{ color: "#7a8a99", fontSize: 12, display: "block", marginBottom: 4 }}>დომეინები (მძიმით გამოყოფილი)</label>
                 <input style={inp} value={form.domains} onChange={e => setForm(f => ({ ...f, domains: e.target.value }))} placeholder="booking.abc.ge,abc.local" />
               </div>
+              <div>
+                <label style={{ color: "#7a8a99", fontSize: 12, display: "block", marginBottom: 4 }}>Booking Slug (appointment.pacsflow.ge/b/slug)</label>
+                <input style={inp} value={form.path_slug} onChange={e => setForm(f => ({ ...f, path_slug: e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") }))} placeholder="im" maxLength={20} />
+              </div>
               <div style={{ gridColumn: "1 / -1", borderTop: "1px solid #2a3540", paddingTop: 14, marginTop: 4 }}>
                 <div style={{ color: "#7a8a99", fontSize: 13, marginBottom: 10 }}>პირველი ადმინისტრატორი (არასავალდებულო)</div>
               </div>
@@ -191,6 +195,7 @@ export default function PlatformTenants() {
                       </span>
                     </div>
                     <div style={{ color: "#7a8a99", fontSize: 12, marginTop: 4, fontFamily: "monospace" }}>slug: {t.slug} · {t.created_at}</div>
+                    {t.path_slug && <div style={{ color: "#5ab0d0", fontSize: 12, marginTop: 4, fontFamily: "monospace" }}>🔗 appointment.pacsflow.ge/b/{t.path_slug}</div>}
 
                     <div style={{ marginTop: 10 }}>
                       {editId === t.id ? (

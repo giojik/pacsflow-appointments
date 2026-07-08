@@ -11,6 +11,7 @@ const links = [
   { to: "/platform/users", label: "Admins", icon: "👤" },
   { to: "/platform/audit", label: "Audit Log", icon: "📜" },
   { to: "/platform/pricing", label: "ფასები", icon: "💰" },
+  { to: "/platform/contacts", label: "შეკვეთები", icon: "📬" },
 ];
 
 export default function PlatformLayout() {

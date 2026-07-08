@@ -3,6 +3,9 @@ from datetime import datetime
 from typing import Optional
 from app.core.config import settings
 from .base import CalendarAdapter, CalendarCredentials, CalendarEvent
+import httpx
+
+TIMEOUT = 30
 
 class GoogleCalendarAdapter(CalendarAdapter):
 
@@ -25,14 +28,13 @@ class GoogleCalendarAdapter(CalendarAdapter):
         return f"{self.AUTH_URL}?{urllib.parse.urlencode(params)}"
 
     def exchange_code(self, code: str) -> CalendarCredentials:
-        import httpx
         r = httpx.post(self.TOKEN_URL, data={
             "code":          code,
             "client_id":     settings.GOOGLE_CLIENT_ID,
             "client_secret": settings.GOOGLE_CLIENT_SECRET,
             "redirect_uri":  settings.GOOGLE_REDIRECT_URI,
             "grant_type":    "authorization_code",
-        })
+        }, timeout=TIMEOUT)
         r.raise_for_status()
         data = r.json()
         return CalendarCredentials(
@@ -43,13 +45,12 @@ class GoogleCalendarAdapter(CalendarAdapter):
         )
 
     def refresh_credentials(self) -> CalendarCredentials:
-        import httpx
         r = httpx.post(self.TOKEN_URL, data={
             "client_id":     settings.GOOGLE_CLIENT_ID,
             "client_secret": settings.GOOGLE_CLIENT_SECRET,
             "refresh_token": self.credentials.refresh_token,
             "grant_type":    "refresh_token",
-        })
+        }, timeout=TIMEOUT)
         r.raise_for_status()
         data = r.json()
         self.credentials.access_token = data["access_token"]
@@ -62,7 +63,6 @@ class GoogleCalendarAdapter(CalendarAdapter):
         return self.credentials.calendar_id or "primary"
 
     def create_event(self, event: CalendarEvent) -> str:
-        import httpx
         body = {
             "summary":     event.title,
             "description": event.description,
@@ -72,16 +72,20 @@ class GoogleCalendarAdapter(CalendarAdapter):
         }
         if event.attendee_email:
             body["attendees"] = [{"email": event.attendee_email}]
-
         r = httpx.post(
             f"{self.API_BASE}/calendars/{self._calendar_id()}/events",
-            json=body, headers=self._headers()
+            json=body, headers=self._headers(), timeout=TIMEOUT
         )
+        if r.status_code == 401:
+            self.refresh_credentials()
+            r = httpx.post(
+                f"{self.API_BASE}/calendars/{self._calendar_id()}/events",
+                json=body, headers=self._headers(), timeout=TIMEOUT
+            )
         r.raise_for_status()
         return r.json()["id"]
 
     def update_event(self, external_id: str, event: CalendarEvent) -> bool:
-        import httpx
         body = {
             "summary":     event.title,
             "description": event.description,
@@ -90,20 +94,30 @@ class GoogleCalendarAdapter(CalendarAdapter):
         }
         r = httpx.put(
             f"{self.API_BASE}/calendars/{self._calendar_id()}/events/{external_id}",
-            json=body, headers=self._headers()
+            json=body, headers=self._headers(), timeout=TIMEOUT
         )
+        if r.status_code == 401:
+            self.refresh_credentials()
+            r = httpx.put(
+                f"{self.API_BASE}/calendars/{self._calendar_id()}/events/{external_id}",
+                json=body, headers=self._headers(), timeout=TIMEOUT
+            )
         return r.status_code == 200
 
     def delete_event(self, external_id: str) -> bool:
-        import httpx
         r = httpx.delete(
             f"{self.API_BASE}/calendars/{self._calendar_id()}/events/{external_id}",
-            headers=self._headers()
+            headers=self._headers(), timeout=TIMEOUT
         )
-        return r.status_code == 204
+        if r.status_code == 401:
+            self.refresh_credentials()
+            r = httpx.delete(
+                f"{self.API_BASE}/calendars/{self._calendar_id()}/events/{external_id}",
+                headers=self._headers(), timeout=TIMEOUT
+            )
+        return r.status_code in (204, 410)
 
     def get_busy_slots(self, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
-        import httpx
         r = httpx.post(
             f"{self.API_BASE}/freeBusy",
             json={
@@ -111,7 +125,7 @@ class GoogleCalendarAdapter(CalendarAdapter):
                 "timeMax": end.isoformat() + "Z",
                 "items":   [{"id": self._calendar_id()}],
             },
-            headers=self._headers()
+            headers=self._headers(), timeout=TIMEOUT
         )
         r.raise_for_status()
         busy = r.json().get("calendars", {}).get(self._calendar_id(), {}).get("busy", [])

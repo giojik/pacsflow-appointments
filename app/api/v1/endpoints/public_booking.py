@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.tenant import resolve_slug_by_host
+from app.core.tenant import resolve_slug
 from app.models.tenant import Tenant
 from app.models.service import Service
 from app.models.provider import Provider, ProviderService
@@ -40,14 +40,12 @@ def _record_rate(ip: str):
     _RATE[ip].append(time.time())
 
 
-def _get_tenant(request: Request, db: Session, tenant: str | None = None) -> Tenant:
-    # ტესტისთვის — ?tenant=slug param გადაწონის Host-ს
-    if tenant:
-        t = db.query(Tenant).filter(Tenant.slug == tenant, Tenant.active == True).first()
+def _get_tenant(request: Request, db: Session, tenant_slug: str | None = None) -> Tenant:
+    if tenant_slug:
+        t = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.active == True).first()
         if t:
             return t
-    host = request.headers.get("host", "")
-    slug = resolve_slug_by_host(host, db)
+    slug = resolve_slug(request, db)
     t = db.query(Tenant).filter(Tenant.slug == slug, Tenant.active == True).first()
     if not t:
         raise HTTPException(404, "კომპანია ვერ მოიძებნა")
@@ -133,10 +131,12 @@ class BookingCreate(BaseModel):
     # სპამის დაცვა
     website: str | None = None      # honeypot — ბოტი შეავსებს
     form_time: float | None = None  # ფორმის შევსების დრო (წამებში)
+    tenant: str | None = None
 
 
 @router.post("/book")
 def public_book(request: Request, body: BookingCreate, db: Session = Depends(get_db)):
+    t = _get_tenant(request, db, body.tenant)
     ip = _client_ip(request)
 
     # 1. honeypot — თუ "website" შევსებულია, ბოტია
@@ -223,3 +223,40 @@ def public_pricing(db: Session = Depends(get_db)):
     if not row:
         return {"plans": []}
     return json.loads(row[0])
+
+class ContactCreate(BaseModel):
+    plan: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    company: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    message: str | None = None
+
+
+@router.post("/contact")
+def public_contact(body: ContactCreate, request: Request, db: Session = Depends(get_db)):
+    from sqlalchemy import text
+
+    ip = _client_ip(request)
+    _check_rate(ip)
+
+    if not body.phone and not body.email:
+        raise HTTPException(400, "ტელეფონი ან email სავალდებულოა")
+
+    db.execute(text(
+        "INSERT INTO contact_requests (plan, first_name, last_name, company, phone, email, message) "
+        "VALUES (:plan, :fn, :ln, :company, :phone, :email, :msg)"
+    ), {
+        "plan": (body.plan or "").strip(),
+        "fn": (body.first_name or "").strip(),
+        "ln": (body.last_name or "").strip(),
+        "company": (body.company or "").strip(),
+        "phone": (body.phone or "").strip(),
+        "email": (body.email or "").strip(),
+        "msg": (body.message or "").strip(),
+    })
+    db.commit()
+    _record_rate(ip)
+
+    return {"success": True, "message": "თქვენი მოთხოვნა მიღებულია! მალე დაგიკავშირდებით."}

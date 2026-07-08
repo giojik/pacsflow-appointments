@@ -16,6 +16,7 @@ class Tenant(Base, TimestampMixin):
     require_personal_id = Column(Boolean, default=False)
     require_dob         = Column(Boolean, default=False)
     domains             = Column(String(1024), default="")
+    path_slug           = Column(String(20), unique=True, nullable=True)
 
     providers    = relationship("Provider",    back_populates="tenant")
     clients      = relationship("Client",      back_populates="tenant")
