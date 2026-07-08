@@ -11,6 +11,7 @@ from app.api.v1.endpoints import audit
 from app.api.v1.endpoints import bulk_import
 from app.api.v1.endpoints import platform
 from app.api.v1.endpoints import public_booking
+from app.api.v1.endpoints import notifications
 
 api_router = APIRouter()
 api_router.include_router(auth.router,           prefix="/auth",          tags=["auth"])
@@ -29,3 +30,4 @@ api_router.include_router(audit.router,    prefix="/audit",    tags=["audit"])
 api_router.include_router(bulk_import.router, tags=["bulk-import"])
 api_router.include_router(platform.router, prefix="/platform", tags=["platform"])
 api_router.include_router(public_booking.router, prefix="/public", tags=["public-booking"])
+api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])

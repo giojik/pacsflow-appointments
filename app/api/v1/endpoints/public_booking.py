@@ -206,6 +206,14 @@ def public_book(request: Request, body: BookingCreate, db: Session = Depends(get
 
     _record_rate(ip)
 
+    # Google Calendar sync + notification
+    try:
+        from app.api.v1.endpoints.appointments import _calendar_sync, _notify_provider
+        _calendar_sync(appt, db, "sync")
+        _notify_provider(appt, db, "new")
+    except Exception as e:
+        print(f"[public_book] sync/notify error: {e}")
+
     return {
         "success": True,
         "appointment_id": appt.id,

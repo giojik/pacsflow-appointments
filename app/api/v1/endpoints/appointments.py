@@ -10,6 +10,45 @@ from app.schemas.appointment import AppointmentCreate, AppointmentUpdate, Appoin
 
 router = APIRouter()
 
+def _notify_provider(appt: Appointment, db: Session, action: str = "new"):
+    """Provider-ს notification გაუგზავნე"""
+    try:
+        from app.models.notification import Notification
+        provider = appt.slot.provider
+        client = appt.client
+        client_name = f"{client.first_name} {client.last_name}" if client else "უცნობი"
+        slot = appt.slot
+
+        if action == "new":
+            title = "ახალი ჩაწერა"
+            body = f"{client_name} — {slot.starts_at.strftime('%d.%m.%Y %H:%M')}"
+        elif action == "cancel":
+            title = "ჩაწერა გაუქმდა"
+            body = f"{client_name} — {slot.starts_at.strftime('%d.%m.%Y %H:%M')}"
+        elif action == "reschedule":
+            title = "ჩაწერა გადაიტანეს"
+            body = f"{client_name} — {slot.starts_at.strftime('%d.%m.%Y %H:%M')}"
+        else:
+            return
+
+        # provider-ს user_id ვიპოვოთ
+        from app.models.user import User
+        provider_user = db.query(User).filter(User.provider_id == provider.id).first()
+
+        notif = Notification(
+            tenant_id=appt.tenant_id,
+            user_id=provider_user.id if provider_user else None,
+            provider_id=provider.id,
+            title=title,
+            body=body,
+            type="appointment",
+            appointment_id=appt.id,
+        )
+        db.add(notif)
+        db.commit()
+    except Exception as e:
+        print(f"[notification] error: {e}")
+
 def _calendar_sync(appt: Appointment, db: Session, action: str = "sync"):
     """Calendar sync — background, არ აჩერებს flow-ს შეცდომისას"""
     try:
@@ -124,6 +163,9 @@ def create_appointment(body: AppointmentCreate, db: Session = Depends(get_db)):
     # Google Calendar sync
     _calendar_sync(appt, db, "sync")
 
+    # Provider notification
+    _notify_provider(appt, db, "new")
+
     return _enrich(appt)
 
 @router.patch("/{appointment_id}", response_model=AppointmentOut)
@@ -152,6 +194,7 @@ def update_appointment(
     # Calendar: გაუქმებისას event წაიშლება, სხვა შემთხვევაში განახლდება
     if is_cancelling:
         _calendar_sync(a, db, "delete")
+        _notify_provider(a, db, "cancel")
     else:
         _calendar_sync(a, db, "sync")
 
@@ -186,6 +229,7 @@ def reschedule_appointment(
 
     # Calendar: ახალი დროით განახლდება
     _calendar_sync(a, db, "sync")
+    _notify_provider(a, db, "reschedule")
 
     return _enrich(a)
 
