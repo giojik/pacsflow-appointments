@@ -520,7 +520,8 @@ export default function Appointments() {
             <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>👨‍⚕️ {selectedAppt.provider_name}</div>
             <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>🕐 {selectedAppt.starts_at?.slice(11,16)} — {selectedAppt.ends_at?.slice(11,16) || "?"}{selectedAppt.ends_at && selectedAppt.starts_at ? ` (${Math.round((new Date(selectedAppt.ends_at) - new Date(selectedAppt.starts_at))/60000)} წთ)` : ""}</div>
             {selectedAppt.service_name && <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>🩺 {selectedAppt.service_name}</div>}
-            <div style={{ fontSize:13, color:"#999", marginBottom:8 }}>📅 {selectedAppt.starts_at?.slice(0,10)}</div>
+            <div style={{ fontSize:13, color:"#999", marginBottom:4 }}>📅 {selectedAppt.starts_at?.slice(0,10)}</div>
+            {selectedAppt.client_phone && user?.role !== "provider" && <div style={{ fontSize:14, marginBottom:8 }}><a href={"tel:"+selectedAppt.client_phone} style={{ color:"#1D9E75", textDecoration:"none" }}>📞 {selectedAppt.client_phone}</a></div>}
             {selectedAppt.code && <div style={{ fontSize:14, color:"#1D9E75", fontWeight:"bold", marginBottom:12 }}>კოდი: {selectedAppt.code}</div>}
             <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:12 }}>
               {selectedAppt.status === "pending" && (

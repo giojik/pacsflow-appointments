@@ -66,6 +66,7 @@ def _enrich(a: Appointment) -> dict:
     slot     = a.slot
     provider = slot.provider if slot else None
     d["client_name"]   = f"{client.first_name} {client.last_name}" if client else None
+    d["client_phone"]  = client.phone if client else None
     d["provider_name"] = f"{provider.first_name} {provider.last_name}" if provider else None
     d["provider_id"]   = provider.id if provider else None
     d["service_name"]  = None

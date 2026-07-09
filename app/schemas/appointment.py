@@ -24,6 +24,7 @@ class AppointmentOut(BaseModel):
 
     # nested
     client_name:   Optional[str] = None
+    client_phone:  Optional[str] = None
     provider_name: Optional[str] = None
     service_name:  Optional[str] = None
     starts_at:     Optional[datetime] = None
