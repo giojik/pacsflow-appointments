@@ -12,10 +12,11 @@ class AuditLog(Base):
     user_id     = Column(UUID(as_uuid=False), index=True)
     username    = Column(String(128))
     user_role   = Column(String(32))
-    method      = Column(String(20))          # POST / PATCH / PUT / DELETE
-    path        = Column(String(512))         # /api/v1/appointments/...
-    entity      = Column(String(64), index=True)  # appointments, clients, ...
+    method      = Column(String(20))
+    path        = Column(String(512))
+    entity      = Column(String(64), index=True)
     status_code = Column(Integer)
     ip          = Column(String(64))
-    body        = Column(Text)                # request body (მასკირებული)
-    created_at  = Column(DateTime, default=datetime.now, index=True)
+    body        = Column(Text)
+    details     = Column(Text)
+    created_at  = Column(DateTime, default=datetime.utcnow, index=True)

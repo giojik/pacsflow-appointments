@@ -174,7 +174,7 @@ export default function Reports() {
       {/* ცხრილი */}
       <div style={{ background: "#fff", borderRadius: 12, padding: 16, flex: 1, overflowY: "auto", minHeight: 0, boxShadow: "0 1px 4px #0001" }}>
         {loading ? <p>იტვირთება...</p> : !rows.length ? <p style={{ color: "#888" }}>ჩანაწერები ვერ მოიძებნა</p> : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: "2px solid #eee", textAlign: "left" }}>
                 <th style={{ padding: 8 }}>თარიღი</th>
@@ -184,6 +184,7 @@ export default function Reports() {
                 <th style={{ padding: 8 }}>ექიმი</th>
                 <th style={{ padding: 8 }}>სერვისი</th>
                 <th style={{ padding: 8 }}>სტატუსი</th>
+                <th style={{ padding: 8 }}>ბოლო ცვლილება</th>
                 <th style={{ padding: 8 }}>შეიქმნა</th>
               </tr>
             </thead>
@@ -201,14 +202,31 @@ export default function Reports() {
                       {STATUS_LABEL[r.status] || r.status}
                     </span>
                   </td>
-                  <td style={{ padding: 8, color: "#888", fontSize: 13 }}>{r.created_at}</td>
+                  <td style={{ padding: 8, fontSize: 12 }}>
+                    {r.cancelled_by ? (
+                      <div>
+                        <div style={{ color: "#e74c3c", fontWeight: 500 }}>გააუქმა: {r.cancelled_by}</div>
+                        {r.cancelled_at && <div style={{ color: "#999", fontSize: 11 }}>{r.cancelled_at}</div>}
+                        {r.modified_from_ip && <div style={{ color: "#aaa", fontSize: 11 }}>IP: {r.modified_from_ip}</div>}
+                        {r.modified_from_ua && <div style={{ color: "#aaa", fontSize: 11 }}>{r.modified_from_ua}</div>}
+                      </div>
+                    ) : r.last_modified_by ? (
+                      <div>
+                        <div style={{ color: "#666" }}>{r.last_modified_by}</div>
+                        {r.modified_from_ip && <div style={{ color: "#aaa", fontSize: 11 }}>IP: {r.modified_from_ip}</div>}
+                        {r.modified_from_ua && <div style={{ color: "#aaa", fontSize: 11 }}>{r.modified_from_ua}</div>}
+                      </div>
+                    ) : (
+                      <span style={{ color: "#ccc" }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: 8, color: "#888", fontSize: 12 }}>{r.created_at}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
 
-        {/* Pagination */}
         {pages > 1 && (
           <div style={{ display: "flex", gap: 6, marginTop: 14, justifyContent: "center", flexWrap: "wrap" }}>
             {Array.from({ length: pages }, (_, i) => (

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.db.session import get_db
@@ -10,8 +10,58 @@ from app.schemas.appointment import AppointmentCreate, AppointmentUpdate, Appoin
 
 router = APIRouter()
 
+
+def _get_client_ip(request: Request) -> str:
+    return (request.headers.get("cf-connecting-ip", "")
+            or request.headers.get("x-real-ip", "")
+            or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else ""))
+
+
+def _get_ua_short(request: Request) -> str:
+    """User-Agent-დან მოკლე აღწერა: ბრაუზერი + OS"""
+    ua = request.headers.get("user-agent", "")
+    if not ua:
+        return ""
+
+    # OS
+    os_name = ""
+    if "Windows" in ua:
+        os_name = "Windows"
+    elif "Mac OS" in ua or "Macintosh" in ua:
+        os_name = "macOS"
+    elif "Android" in ua:
+        os_name = "Android"
+    elif "iPhone" in ua or "iPad" in ua:
+        os_name = "iOS"
+    elif "Linux" in ua:
+        os_name = "Linux"
+
+    # Browser
+    browser = ""
+    if "Edg/" in ua:
+        browser = "Edge"
+    elif "OPR/" in ua or "Opera" in ua:
+        browser = "Opera"
+    elif "Chrome/" in ua and "Safari/" in ua:
+        browser = "Chrome"
+    elif "Firefox/" in ua:
+        browser = "Firefox"
+    elif "Safari/" in ua:
+        browser = "Safari"
+
+    parts = [p for p in [browser, os_name] if p]
+    return " / ".join(parts) if parts else ua[:100]
+
+
+def _stamp_modification(a: Appointment, request: Request, current_user):
+    """ყოველი ცვლილებისას ვინახავთ ვინ, საიდან, რა სისტემით"""
+    a.last_modified_by = current_user.username
+    a.modified_from_ip = _get_client_ip(request)
+    a.modified_from_ua = _get_ua_short(request)
+
+
 def _notify_provider(appt: Appointment, db: Session, action: str = "new"):
-    """Provider-ს notification გაუგზავნე"""
     try:
         from app.models.notification import Notification
         provider = appt.slot.provider
@@ -31,7 +81,6 @@ def _notify_provider(appt: Appointment, db: Session, action: str = "new"):
         else:
             return
 
-        # provider-ს user_id ვიპოვოთ
         from app.models.user import User
         provider_user = db.query(User).filter(User.provider_id == provider.id).first()
 
@@ -50,7 +99,6 @@ def _notify_provider(appt: Appointment, db: Session, action: str = "new"):
         print(f"[notification] error: {e}")
 
 def _calendar_sync(appt: Appointment, db: Session, action: str = "sync"):
-    """Calendar sync — background, არ აჩერებს flow-ს შეცდომისას"""
     try:
         from app.services.calendar.service import calendar_service
         if action == "sync":
@@ -162,10 +210,7 @@ def create_appointment(body: AppointmentCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(appt)
 
-    # Google Calendar sync
     _calendar_sync(appt, db, "sync")
-
-    # Provider notification
     _notify_provider(appt, db, "new")
 
     return _enrich(appt)
@@ -174,6 +219,7 @@ def create_appointment(body: AppointmentCreate, db: Session = Depends(get_db)):
 def update_appointment(
     appointment_id: str,
     body: AppointmentUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -185,15 +231,18 @@ def update_appointment(
 
     if is_cancelling:
         a.slot.status = SlotStatus.available
+        a.cancelled_by = current_user.username
+        a.cancelled_at = datetime.utcnow()
         from app.api.v1.endpoints.waitlist import notify_waitlist
         notify_waitlist(a.slot_id, db)
+
+    _stamp_modification(a, request, current_user)
 
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(a, k, v)
     db.commit()
     db.refresh(a)
 
-    # Calendar: გაუქმებისას event წაიშლება, სხვა შემთხვევაში განახლდება
     if is_cancelling:
         _calendar_sync(a, db, "delete")
         _notify_provider(a, db, "cancel")
@@ -206,10 +255,10 @@ def update_appointment(
 def reschedule_appointment(
     appointment_id: str,
     slot_id: str = Query(...),
+    request: Request = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    """ჩაწერის სლოტის შეცვლა — გადატანა"""
     a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not a:
         raise HTTPException(404, "ჩაწერა ვერ მოიძებნა")
@@ -225,11 +274,11 @@ def reschedule_appointment(
     a.slot.status = SlotStatus.available
     new_slot.status = SlotStatus.booked
     a.slot_id = slot_id
+    _stamp_modification(a, request, current_user)
 
     db.commit()
     db.refresh(a)
 
-    # Calendar: ახალი დროით განახლდება
     _calendar_sync(a, db, "sync")
     _notify_provider(a, db, "reschedule")
 

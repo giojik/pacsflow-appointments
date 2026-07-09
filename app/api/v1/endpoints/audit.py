@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -10,7 +10,17 @@ from app.models.user import UserRole
 
 router = APIRouter()
 
+TZ_TBILISI = timezone(timedelta(hours=4))
+
 METHOD_KA = {"POST": "შექმნა", "PATCH": "შეცვლა", "PUT": "შეცვლა", "DELETE": "წაშლა"}
+
+
+def _to_tbilisi(dt: datetime | None) -> str:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ_TBILISI).strftime("%Y-%m-%d %H:%M:%S")
 
 
 @router.get("/")
@@ -39,19 +49,20 @@ def list_audit(
         q = q.filter(AuditLog.method == method.upper())
     if date_from:
         try:
-            q = q.filter(AuditLog.created_at >= datetime.strptime(date_from, "%Y-%m-%d"))
+            dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=TZ_TBILISI)
+            q = q.filter(AuditLog.created_at >= dt_from.astimezone(timezone.utc).replace(tzinfo=None))
         except ValueError:
             raise HTTPException(400, "date_from ფორმატი: YYYY-MM-DD")
     if date_to:
         try:
-            q = q.filter(AuditLog.created_at < datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1))
+            dt_to = (datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)).replace(tzinfo=TZ_TBILISI)
+            q = q.filter(AuditLog.created_at < dt_to.astimezone(timezone.utc).replace(tzinfo=None))
         except ValueError:
             raise HTTPException(400, "date_to ფორმატი: YYYY-MM-DD")
 
     total = q.count()
     rows = q.order_by(AuditLog.created_at.desc()).limit(limit).offset(offset).all()
 
-    # entity-ების სია ფილტრის dropdown-ისთვის
     entities = [r[0] for r in db.query(AuditLog.entity)
                 .filter(AuditLog.tenant_id == tenant_id).distinct().all() if r[0]]
 
@@ -60,11 +71,12 @@ def list_audit(
         "entities": sorted(entities),
         "rows": [{
             "id": r.id,
-            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else "",
+            "created_at": _to_tbilisi(r.created_at),
             "username": r.username or "(უცნობი)",
             "user_role": r.user_role or "",
             "method": r.method,
             "method_ka": METHOD_KA.get(r.method, r.method),
+            "details": r.details or "",
             "entity": r.entity,
             "path": r.path,
             "status_code": r.status_code,

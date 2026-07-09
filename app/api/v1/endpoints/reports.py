@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -17,6 +17,8 @@ from app.models.user import UserRole
 
 router = APIRouter()
 
+TZ_TBILISI = timezone(timedelta(hours=4))
+
 STATUS_KA = {
     "pending":   "მოლოდინში",
     "confirmed": "დადასტურებული",
@@ -26,14 +28,18 @@ STATUS_KA = {
 }
 
 
+def _to_tbilisi(dt: datetime | None) -> str:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ_TBILISI).strftime("%Y-%m-%d %H:%M")
+
+
 def _base_query(
-    db: Session,
-    current_user,
-    tenant_id: str,
-    date_from: str | None,
-    date_to: str | None,
-    provider_id: str | None,
-    service_id: str | None,
+    db: Session, current_user, tenant_id: str,
+    date_from: str | None, date_to: str | None,
+    provider_id: str | None, service_id: str | None,
     status: AppointmentStatus | None,
 ):
     q = (
@@ -45,7 +51,6 @@ def _base_query(
         .filter(Appointment.tenant_id == tenant_id)
     )
 
-    # provider-ს მხოლოდ საკუთარი ჩანაწერები
     if current_user.role == UserRole.provider and current_user.provider_id:
         q = q.filter(Slot.provider_id == current_user.provider_id)
     elif provider_id:
@@ -85,7 +90,12 @@ def _row(a: Appointment, s: Slot, c: Client, p: Provider, svc: Service | None) -
         "status":        a.status.value if a.status else "",
         "status_ka":     STATUS_KA.get(a.status.value, a.status.value) if a.status else "",
         "notes":         a.notes or "",
-        "created_at":    a.created_at.strftime("%Y-%m-%d %H:%M") if a.created_at else "",
+        "created_at":    _to_tbilisi(a.created_at),
+        "cancelled_by":  a.cancelled_by or "",
+        "cancelled_at":  _to_tbilisi(a.cancelled_at),
+        "last_modified_by": a.last_modified_by or "",
+        "modified_from_ip": a.modified_from_ip or "",
+        "modified_from_ua": a.modified_from_ua or "",
     }
 
 
@@ -108,7 +118,6 @@ def report_list(
     total = q.count()
     rows = [_row(*r) for r in q.limit(limit).offset(offset).all()]
 
-    # summary — ფილტრებით, status-ის გარეშე (რომ ყველა სტატუსის ჯამი ჩანდეს)
     sq = _base_query(db, current_user, tenant_id, date_from, date_to,
                      provider_id, service_id, None)
     counts = {st.value: 0 for st in AppointmentStatus}
@@ -134,6 +143,11 @@ EXPORT_HEADERS = [
     ("provider_name", "ექიმი"),
     ("service_name",  "სერვისი"),
     ("status_ka",     "სტატუსი"),
+    ("cancelled_by",  "გააუქმა"),
+    ("cancelled_at",  "გაუქმების დრო"),
+    ("last_modified_by", "ბოლოს შეცვალა"),
+    ("modified_from_ip", "IP მისამართი"),
+    ("modified_from_ua", "სისტემა"),
     ("notes",         "შენიშვნა"),
     ("created_at",    "შეიქმნა"),
 ]
@@ -159,7 +173,7 @@ def report_export(
 
     if format == "csv":
         buf = io.StringIO()
-        buf.write("\ufeff")  # UTF-8 BOM — Excel-ისთვის ქართული
+        buf.write("\ufeff")
         w = csv.writer(buf, delimiter=";")
         w.writerow([h for _, h in EXPORT_HEADERS])
         for r in rows:
@@ -171,7 +185,6 @@ def report_export(
             headers={"Content-Disposition": f"attachment; filename=report_{stamp}.csv"},
         )
 
-    # xlsx
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill
@@ -195,7 +208,6 @@ def report_export(
         for col, (k, _) in enumerate(EXPORT_HEADERS, start=1):
             ws.cell(row=i, column=col, value=r[k])
 
-    # სვეტების სიგანე
     for col, (k, h) in enumerate(EXPORT_HEADERS, start=1):
         max_len = max([len(str(h))] + [len(str(r[k])) for r in rows[:500]] or [10])
         ws.column_dimensions[get_column_letter(col)].width = min(max_len + 3, 40)

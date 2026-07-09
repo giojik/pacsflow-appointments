@@ -12,6 +12,7 @@ export default function Providers() {
   const [form, setForm] = useState({ first_name: "", last_name: "", specialty: "", phone: "", email: "" });
   const [saving, setSaving] = useState(false);
   const [calendarStatus, setCalendarStatus] = useState({});
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     const init = async () => {
@@ -23,7 +24,6 @@ export default function Providers() {
     init();
   }, []);
 
-  // OAuth popup-იდან შეტყობინების მოსმენა
   useEffect(() => {
     const handler = (e) => {
       if (e.data?.type === "calendar_connected") {
@@ -41,7 +41,6 @@ export default function Providers() {
       if (tid) params.tenant_id = tid;
       const { data } = await api.get("/providers/", { params });
       setProviders(data);
-      // calendar status ავტომატურად provider data-ში
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -147,9 +146,23 @@ export default function Providers() {
         </form>
       )}
 
+      <div style={{ marginBottom:16 }}>
+        <input
+          placeholder="🔍 ძებნა (სახელი, გვარი, სპეციალობა, ტელეფონი, ემაილი)"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ ...inp, background:"#fff", maxWidth:420 }}
+        />
+      </div>
+
       <div style={{ display:"grid", gap:12 }}>
         {providers.length === 0 && <p>პროვაიდერები არ არის</p>}
-        {providers.map(p => {
+        {providers.filter(p => {
+          if (!search.trim()) return true;
+          const s = search.toLowerCase();
+          return [p.first_name, p.last_name, p.specialty, p.phone, p.email]
+            .filter(Boolean).some(v => v.toLowerCase().includes(s));
+        }).map(p => {
           const cal = calendarStatus[p.id] || {};
           return (
             <div key={p.id} style={{

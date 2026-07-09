@@ -121,10 +121,8 @@ export default function AuditLog() {
             <thead>
               <tr style={{ borderBottom: "2px solid #eee", textAlign: "left" }}>
                 <th style={{ padding: 8 }}>დრო</th>
-                <th style={{ padding: 8 }}>მომხმარებელი</th>
                 <th style={{ padding: 8 }}>მოქმედება</th>
-                <th style={{ padding: 8 }}>ობიექტი</th>
-                <th style={{ padding: 8 }}>Path</th>
+                <th style={{ padding: 8 }}>დეტალები</th>
                 <th style={{ padding: 8 }}>Status</th>
                 <th style={{ padding: 8 }}>IP</th>
                 <th style={{ padding: 8 }}></th>
@@ -134,18 +132,20 @@ export default function AuditLog() {
               {rows.map(r => (
                 <>
                   <tr key={r.id} style={{ borderBottom: "1px solid #f2f2f2" }}>
-                    <td style={{ padding: 8, whiteSpace: "nowrap", color: "#666" }}>{r.created_at}</td>
-                    <td style={{ padding: 8 }}>
-                      <b>{r.username}</b>
-                      <div style={{ fontSize: 11, color: "#999" }}>{r.user_role}</div>
-                    </td>
+                    <td style={{ padding: 8, whiteSpace: "nowrap", color: "#666", fontSize: 12 }}>{r.created_at}</td>
                     <td style={{ padding: 8 }}>
                       <span style={{ background: (METHOD_COLOR[r.method] || "#888") + "22", color: METHOD_COLOR[r.method] || "#888", padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: "bold" }}>
                         {METHOD_LABEL[r.method] || r.method}
                       </span>
                     </td>
-                    <td style={{ padding: 8 }}>{ENTITY_LABEL[r.entity] || r.entity}</td>
-                    <td style={{ padding: 8, fontFamily: "monospace", fontSize: 12, color: "#555", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.path}</td>
+                    <td style={{ padding: 8, maxWidth: 500 }}>
+                      <div style={{ fontWeight: 500, marginBottom: 2 }}>{r.details || ""}</div>
+                      <div style={{ fontSize: 11, color: "#999" }}>
+                        {ENTITY_LABEL[r.entity] || r.entity}
+                        <span style={{ margin: "0 4px" }}>·</span>
+                        <span style={{ fontFamily: "monospace" }}>{r.path}</span>
+                      </div>
+                    </td>
                     <td style={{ padding: 8 }}>
                       <span style={{ color: r.status_code < 400 ? "#1D9E75" : "#e74c3c", fontWeight: "bold" }}>{r.status_code}</span>
                     </td>
@@ -154,14 +154,14 @@ export default function AuditLog() {
                       {r.body && (
                         <button onClick={() => setExpanded(expanded === r.id ? null : r.id)}
                           style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #ddd", background: "#fff", cursor: "pointer", fontSize: 12 }}>
-                          {expanded === r.id ? "▲" : "▼ დეტალები"}
+                          {expanded === r.id ? "▲" : "▼"}
                         </button>
                       )}
                     </td>
                   </tr>
                   {expanded === r.id && (
                     <tr key={r.id + "_detail"}>
-                      <td colSpan={8} style={{ padding: 0 }}>
+                      <td colSpan={6} style={{ padding: 0 }}>
                         <pre style={{ margin: 0, padding: 14, background: "#f8f9fa", fontSize: 12, overflowX: "auto", borderBottom: "1px solid #eee" }}>
                           {prettyBody(r.body)}
                         </pre>
