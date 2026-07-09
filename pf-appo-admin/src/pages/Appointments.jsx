@@ -270,7 +270,7 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
       <div style={{ width:50, flexShrink:0 }}>
         <div style={{ height:40 }} />
         {slots.map((s, i) => (
-          <div key={i} style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", paddingRight:8, fontSize: s.m === 0 ? 11 : 10, color: s.m === 0 ? "#666" : "#bbb", textAlign:"right", lineHeight:SLOT_H+"px", fontWeight: s.m === 0 ? 600 : 400 }}>
+          <div key={i} style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", paddingRight:8, fontSize: s.m === 0 ? 11 : 10, color: s.m === 0 ? "#666" : "#bbb", textAlign:"right", lineHeight:SLOT_H+"px", fontWeight: s.m === 0 ? 600 : 400, boxSizing:"border-box" }}>
             {s.label}
           </div>
         ))}
@@ -294,7 +294,7 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
               {slots.map((s, i) => (
                 <div key={i}
                   onClick={() => onEmptyClick && onEmptyClick(date, s.h)}
-                  style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", cursor:"pointer" }}
+                  style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", cursor:"pointer", boxSizing:"border-box" }}
                   onMouseOver={e => e.currentTarget.style.background="#f0faf6"}
                   onMouseOut={e => e.currentTarget.style.background="transparent"}
                 />
@@ -517,8 +517,10 @@ export default function Appointments() {
           onClick={() => { setSelectedAppt(null); load(); }}>
           <div style={{ background:"#fff", borderRadius:12, padding:24, width:420 }} onClick={e => e.stopPropagation()}>
             <h3 style={{ margin:"0 0 12px" }}>{selectedAppt.client_name}</h3>
-            <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>{selectedAppt.provider_name} · {selectedAppt.starts_at?.slice(11,16)}</div>
-            {selectedAppt.service_name && <div style={{ fontSize:13, color:"#999", marginBottom:8 }}>{selectedAppt.service_name}</div>}
+            <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>👨‍⚕️ {selectedAppt.provider_name}</div>
+            <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>🕐 {selectedAppt.starts_at?.slice(11,16)} — {selectedAppt.ends_at?.slice(11,16) || "?"}{selectedAppt.ends_at && selectedAppt.starts_at ? ` (${Math.round((new Date(selectedAppt.ends_at) - new Date(selectedAppt.starts_at))/60000)} წთ)` : ""}</div>
+            {selectedAppt.service_name && <div style={{ fontSize:14, color:"#666", marginBottom:4 }}>🩺 {selectedAppt.service_name}</div>}
+            <div style={{ fontSize:13, color:"#999", marginBottom:8 }}>📅 {selectedAppt.starts_at?.slice(0,10)}</div>
             {selectedAppt.code && <div style={{ fontSize:14, color:"#1D9E75", fontWeight:"bold", marginBottom:12 }}>კოდი: {selectedAppt.code}</div>}
             <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:12 }}>
               {selectedAppt.status === "pending" && (

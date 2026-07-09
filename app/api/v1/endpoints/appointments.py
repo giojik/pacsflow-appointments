@@ -70,6 +70,7 @@ def _enrich(a: Appointment) -> dict:
     d["provider_id"]   = provider.id if provider else None
     d["service_name"]  = None
     d["starts_at"]     = slot.starts_at if slot else None
+    d["ends_at"]       = slot.ends_at if slot else None
     if slot and slot.service_id:
         from app.models.service import Service
         from app.db.session import SessionLocal

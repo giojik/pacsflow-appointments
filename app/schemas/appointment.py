@@ -27,6 +27,7 @@ class AppointmentOut(BaseModel):
     provider_name: Optional[str] = None
     service_name:  Optional[str] = None
     starts_at:     Optional[datetime] = None
+    ends_at:       Optional[datetime] = None
     code:          Optional[str] = None   # PF-XXXXXX
 
     class Config:
