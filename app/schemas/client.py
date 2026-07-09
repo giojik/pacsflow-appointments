@@ -5,7 +5,7 @@ from datetime import datetime, date
 class ClientBase(BaseModel):
     first_name:  str
     last_name:   str
-    phone:       str
+    phone:       Optional[str] = None
     email:       Optional[str] = None
     personal_id: Optional[str] = None
     dob:         Optional[date] = None

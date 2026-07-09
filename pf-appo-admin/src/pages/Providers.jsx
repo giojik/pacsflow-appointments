@@ -41,15 +41,7 @@ export default function Providers() {
       if (tid) params.tenant_id = tid;
       const { data } = await api.get("/providers/", { params });
       setProviders(data);
-      // calendar status-ების ჩატვირთვა
-      const statuses = {};
-      for (const p of data) {
-        try {
-          const { data: st } = await api.get(`/auth/calendar/status/${p.id}`);
-          statuses[p.id] = st;
-        } catch { statuses[p.id] = { connected: false }; }
-      }
-      setCalendarStatus(statuses);
+      // calendar status ავტომატურად provider data-ში
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };

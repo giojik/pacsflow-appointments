@@ -245,15 +245,16 @@ function NewAppointmentModal({ onClose, onCreated, tenantId, defaultDate }) {
   );
 }
 
-function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
+function DayView({ dates, appointments, onApptClick, onEmptyClick, zoom }) {
   const startHour = 8;
   const endHour   = 20;
-  const SLOT_MIN = 15;
-  const SLOT_H = 20;
+  const SLOT_MIN = 5;
+  const SLOT_H = zoom || 20;
   const slots = [];
   for (let h = startHour; h < endHour; h++) {
     for (let m = 0; m < 60; m += SLOT_MIN) {
-      slots.push({ h, m, label: String(h).padStart(2,"0")+":"+String(m).padStart(2,"0") });
+      const lbl = (m === 0) ? String(h).padStart(2,"0")+":00" : (m % 15 === 0) ? String(h).padStart(2,"0")+":"+String(m).padStart(2,"0") : "";
+      slots.push({ h, m, label: lbl });
     }
   }
 
@@ -261,7 +262,10 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
     const start    = parseInt(appt.starts_at?.slice(11,13) || 0);
     const startMin = parseInt(appt.starts_at?.slice(14,16) || 0);
     const top    = ((start - startHour) * 60 + startMin) * (SLOT_H / SLOT_MIN);
-    const height = Math.max(30 * (SLOT_H / SLOT_MIN), SLOT_H);
+    const endH   = parseInt(appt.ends_at?.slice(11,13) || start);
+    const endMin = parseInt(appt.ends_at?.slice(14,16) || 0);
+    const durMin = appt.ends_at ? ((endH * 60 + endMin) - (start * 60 + startMin)) : 30;
+    const height = Math.max(durMin * (SLOT_H / SLOT_MIN), SLOT_H);
     return { top, height };
   };
 
@@ -270,7 +274,7 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
       <div style={{ width:50, flexShrink:0 }}>
         <div style={{ height:40 }} />
         {slots.map((s, i) => (
-          <div key={i} style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", paddingRight:8, fontSize: s.m === 0 ? 11 : 10, color: s.m === 0 ? "#666" : "#bbb", textAlign:"right", lineHeight:SLOT_H+"px", fontWeight: s.m === 0 ? 600 : 400, boxSizing:"border-box" }}>
+          <div key={i} style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", paddingRight:8, fontSize: s.m === 0 ? 11 : 10, color: s.m === 0 ? "#666" : s.m % 15 === 0 ? "#bbb" : "transparent", textAlign:"right", lineHeight:SLOT_H+"px", fontWeight: s.m === 0 ? 600 : 400, boxSizing:"border-box" }}>
             {s.label}
           </div>
         ))}
@@ -294,7 +298,7 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
               {slots.map((s, i) => (
                 <div key={i}
                   onClick={() => onEmptyClick && onEmptyClick(date, s.h)}
-                  style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", cursor:"pointer", boxSizing:"border-box" }}
+                  style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : s.m % 15 === 0 ? "1px dashed #e8e8e8" : "1px dotted #f0f0f0", cursor:"pointer", boxSizing:"border-box" }}
                   onMouseOver={e => e.currentTarget.style.background="#f0faf6"}
                   onMouseOut={e => e.currentTarget.style.background="transparent"}
                 />
@@ -380,6 +384,7 @@ export default function Appointments() {
   const [providers, setProviders]       = useState([]);
   const [showNewAppt, setShowNewAppt]   = useState(false);
   const [view, setView]                 = useState("week");
+  const [zoom, setZoom]                 = useState(20);
   const [anchor, setAnchor]             = useState(new Date());
   const [filterProvider, setFilterProvider] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -652,9 +657,14 @@ export default function Appointments() {
             </div>
           )}
         </div>
+        <div style={{ display:"flex", gap:4, alignItems:"center", marginLeft:"auto" }}>
+          <button onClick={() => setZoom(z => Math.max(10, z - 5))} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid #ddd", cursor:"pointer", fontSize:14, background:"#fff" }}>−</button>
+          <span style={{ fontSize:11, color:"#999", minWidth:20, textAlign:"center" }}>{zoom}</span>
+          <button onClick={() => setZoom(z => Math.min(50, z + 5))} style={{ padding:"4px 10px", borderRadius:6, border:"1px solid #ddd", cursor:"pointer", fontSize:14, background:"#fff" }}>+</button>
+        </div>
         <button onClick={() => setShowNewAppt(true)} style={{
           background:"#1D9E75", color:"#fff", border:"none",
-          padding:"8px 16px", borderRadius:8, cursor:"pointer", marginLeft:"auto"
+          padding:"8px 16px", borderRadius:8, cursor:"pointer"
         }}>+ ჩაწერა</button>
       </div>
 
@@ -671,6 +681,7 @@ export default function Appointments() {
             <DayView
               dates={getDates()}
               appointments={displayAppointments}
+              zoom={zoom}
               onApptClick={setSelectedAppt}
               onEmptyClick={(date) => { setAnchor(date); setShowNewAppt(true); }}
             />
