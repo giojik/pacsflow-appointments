@@ -87,8 +87,8 @@ export default function PublicBooking() {
   // ── styles ──
   const inp = {
     width: "100%", boxSizing: "border-box", padding: "12px 16px", borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)",
-    color: "#fff", fontSize: 15, outline: "none",
+    border: "1px solid rgba(0,0,0,0.15)", background: "rgba(255,255,255,0.9)",
+    color: "#333", fontSize: 15, outline: "none",
   };
   const glassCard = {
     background: "rgba(255,255,255,0.06)", backdropFilter: "blur(10px)",

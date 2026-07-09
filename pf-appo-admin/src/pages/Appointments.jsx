@@ -248,13 +248,20 @@ function NewAppointmentModal({ onClose, onCreated, tenantId, defaultDate }) {
 function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
   const startHour = 8;
   const endHour   = 20;
-  const hours = Array.from({length: endHour - startHour}, (_, i) => i + startHour);
+  const SLOT_MIN = 15;
+  const SLOT_H = 20;
+  const slots = [];
+  for (let h = startHour; h < endHour; h++) {
+    for (let m = 0; m < 60; m += SLOT_MIN) {
+      slots.push({ h, m, label: String(h).padStart(2,"0")+":"+String(m).padStart(2,"0") });
+    }
+  }
 
   const getApptStyle = (appt) => {
     const start    = parseInt(appt.starts_at?.slice(11,13) || 0);
     const startMin = parseInt(appt.starts_at?.slice(14,16) || 0);
-    const top    = ((start - startHour) * 60 + startMin) * (50/60);
-    const height = 50;
+    const top    = ((start - startHour) * 60 + startMin) * (SLOT_H / SLOT_MIN);
+    const height = Math.max(30 * (SLOT_H / SLOT_MIN), SLOT_H);
     return { top, height };
   };
 
@@ -262,9 +269,9 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
     <div style={{ display:"flex", flex:1, overflowX:"auto" }}>
       <div style={{ width:50, flexShrink:0 }}>
         <div style={{ height:40 }} />
-        {hours.map(h => (
-          <div key={h} style={{ height:50, borderTop:"1px solid #f0f0f0", paddingRight:8, fontSize:11, color:"#999", textAlign:"right", lineHeight:"50px" }}>
-            {String(h).padStart(2,"0")}:00
+        {slots.map((s, i) => (
+          <div key={i} style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", paddingRight:8, fontSize: s.m === 0 ? 11 : 10, color: s.m === 0 ? "#666" : "#bbb", textAlign:"right", lineHeight:SLOT_H+"px", fontWeight: s.m === 0 ? 600 : 400 }}>
+            {s.label}
           </div>
         ))}
       </div>
@@ -284,10 +291,10 @@ function DayView({ dates, appointments, onApptClick, onEmptyClick }) {
               <span style={{ fontSize:11, opacity:0.8 }}>{date.getDate()}</span>
             </div>
             <div style={{ position:"relative" }}>
-              {hours.map(h => (
-                <div key={h}
-                  onClick={() => onEmptyClick && onEmptyClick(date, h)}
-                  style={{ height:50, borderTop:"1px solid #f0f0f0", cursor:"pointer" }}
+              {slots.map((s, i) => (
+                <div key={i}
+                  onClick={() => onEmptyClick && onEmptyClick(date, s.h)}
+                  style={{ height:SLOT_H, borderTop: s.m === 0 ? "1px solid #d0d0d0" : "1px dashed #e8e8e8", cursor:"pointer" }}
                   onMouseOver={e => e.currentTarget.style.background="#f0faf6"}
                   onMouseOut={e => e.currentTarget.style.background="transparent"}
                 />

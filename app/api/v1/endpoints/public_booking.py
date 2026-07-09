@@ -74,8 +74,7 @@ def public_providers(request: Request, service_id: str | None = None, tenant: st
         # მხოლოდ ის ექიმები ვინც ამ სერვისს უწევს
         provider_ids = [ps.provider_id for ps in db.query(ProviderService).filter(
             ProviderService.service_id == service_id).all()]
-        if provider_ids:
-            q = q.filter(Provider.id.in_(provider_ids))
+        q = q.filter(Provider.id.in_(provider_ids)) if provider_ids else q.filter(Provider.id == None)
 
     return [{
         "id": p.id, "name": f"{p.first_name} {p.last_name}",

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pacsflow-v1';
+const CACHE_NAME = 'pacsflow-v2';
 const PRECACHE = ['/app', '/login'];
 
 self.addEventListener('install', (e) => {
