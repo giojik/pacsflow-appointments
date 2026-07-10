@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+import time
+from collections import defaultdict
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 from app.db.session import get_db
@@ -6,9 +9,32 @@ from app.models.appointment import AppointmentCode
 
 router = APIRouter()
 
+# ── IP-ზე დაფუძნებული rate limit (იგივე პატერნი რაც public_booking.py-ში) ──
+_RATE: dict[str, list[float]] = defaultdict(list)
+RATE_LIMIT = 20     # მაქს. ცდა
+RATE_WINDOW = 60    # წამში
+
+
+def _client_ip(request: Request) -> str:
+    return (request.headers.get("cf-connecting-ip", "")
+            or request.headers.get("x-real-ip", "")
+            or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or (request.client.host if request.client else "unknown"))
+
+
+def _check_rate(ip: str):
+    now = time.time()
+    _RATE[ip] = [t for t in _RATE[ip] if now - t < RATE_WINDOW]
+    if len(_RATE[ip]) >= RATE_LIMIT:
+        raise HTTPException(429, "ძალიან ბევრი მცდელობა. სცადეთ მოგვიანებით.")
+    _RATE[ip].append(now)
+
+
 @router.get("/{code}/verify")
-def verify_code(code: str, db: Session = Depends(get_db)):
+def verify_code(code: str, request: Request, db: Session = Depends(get_db)):
     """QMS კიოსკი ამ endpoint-ს იძახებს კოდის შეყვანისას"""
+    _check_rate(_client_ip(request))
+
     record = db.query(AppointmentCode).filter(
         AppointmentCode.code == code.upper(),
         AppointmentCode.used == False,
@@ -35,8 +61,10 @@ def verify_code(code: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/{code}/use")
-def mark_code_used(code: str, db: Session = Depends(get_db)):
+def mark_code_used(code: str, request: Request, db: Session = Depends(get_db)):
     """QMS ბილეთის გაცემის შემდეგ კოდს მოხმარებულად ნიშნავს"""
+    _check_rate(_client_ip(request))
+
     record = db.query(AppointmentCode).filter(
         AppointmentCode.code == code.upper()
     ).first()

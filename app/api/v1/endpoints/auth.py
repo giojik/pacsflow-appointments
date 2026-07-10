@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -197,14 +197,19 @@ def update_user(
     return user
 
 @router.post("/users/seed-superadmin", status_code=201)
-def seed_superadmin(db: Session = Depends(get_db)):
-    """პირველი გაშვებისას superadmin-ის შექმნა"""
+def seed_superadmin(setup_secret: str = Query(...), db: Session = Depends(get_db)):
+    """პირველი გაშვებისას superadmin-ის შექმნა — მოითხოვს SETUP_SECRET env ცვლადს.
+    თუ SETUP_SECRET დაყენებული არაა, endpoint მთლიანად გამორთულია."""
+    if not settings.SETUP_SECRET or setup_secret != settings.SETUP_SECRET:
+        raise HTTPException(403, "წვდომა აკრძალულია")
     existing = db.query(User).filter(User.role == UserRole.superadmin).first()
     if existing:
         raise HTTPException(409, "Superadmin უკვე არსებობს")
+    import secrets
+    generated_password = secrets.token_urlsafe(16)
     user = User(
         username="superadmin",
-        hashed_password=hash_password("changeme123"),
+        hashed_password=hash_password(generated_password),
         role=UserRole.superadmin,
         auth_provider=AuthProvider.local,
         full_name="Super Admin",
@@ -212,4 +217,4 @@ def seed_superadmin(db: Session = Depends(get_db)):
     )
     db.add(user)
     db.commit()
-    return {"username": "superadmin", "password": "changeme123", "message": "პაროლი შეიცვალე!"}
+    return {"username": "superadmin", "password": generated_password, "message": "პაროლი შეინახე და დაუყოვნებლივ შეცვალე!"}

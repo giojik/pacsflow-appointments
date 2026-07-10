@@ -1,6 +1,10 @@
 """
 Calendar OAuth endpoints — platform-level
 """
+import hashlib
+import hmac
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
@@ -8,9 +12,37 @@ from app.db.session import get_db
 from app.models.provider import Provider, CalendarProvider
 from app.models.tenant import Tenant
 from app.core.config import settings
+from app.core.auth import get_current_active_user
 import json, base64, urllib.parse, httpx
 
 router = APIRouter()
+
+STATE_TTL_SECONDS = 600  # 10 წუთი — state ვადიანია, callback უნდა დასრულდეს ამ დროში
+
+
+def _sign_state(payload: dict) -> str:
+    """State-ს ვხატავთ HMAC ხელმოწერით, რომ callback-ზე ვერავინ ვერ გააყალბოს provider_id."""
+    payload = {**payload, "ts": time.time()}
+    raw = json.dumps(payload, sort_keys=True).encode()
+    sig = hmac.new(settings.SECRET_KEY.encode(), raw, hashlib.sha256).hexdigest()
+    state = {"data": base64.urlsafe_b64encode(raw).decode(), "sig": sig}
+    return base64.urlsafe_b64encode(json.dumps(state).encode()).decode()
+
+
+def _verify_state(state: str) -> dict:
+    try:
+        outer = json.loads(base64.urlsafe_b64decode(state + "=="))
+        raw = base64.urlsafe_b64decode(outer["data"] + "==")
+        expected_sig = hmac.new(settings.SECRET_KEY.encode(), raw, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_sig, outer["sig"]):
+            raise ValueError("bad signature")
+        payload = json.loads(raw)
+        if time.time() - payload.get("ts", 0) > STATE_TTL_SECONDS:
+            raise ValueError("expired state")
+        return payload
+    except Exception:
+        raise HTTPException(400, "არასწორი ან ვადაგასული state პარამეტრი")
+
 
 def _google_auth_url(state: str) -> str:
     params = {
@@ -50,16 +82,17 @@ def start_oauth(
     provider_type: str,
     provider_id: str = Query(...),
     db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user),
 ):
     if provider_type != "google":
         raise HTTPException(400, "ამჟამად მხოლოდ Google Calendar-ია მხარდაჭერილი")
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
-    state = base64.urlsafe_b64encode(json.dumps({
+    state = _sign_state({
         "provider_id":   provider_id,
         "provider_type": provider_type,
-    }).encode()).decode()
+    })
     return RedirectResponse(_google_auth_url(state))
 
 @router.get("/callback")
@@ -68,10 +101,10 @@ def oauth_callback(
     state: str = Query(...),
     db: Session = Depends(get_db)
 ):
-    try:
-        state_data = json.loads(base64.urlsafe_b64decode(state + "=="))
-    except Exception:
-        raise HTTPException(400, "არასწორი state პარამეტრი")
+    # callback მოდის Google-დან ბრაუზერის რედირექტით — Bearer token ვერ გამოგვადგება,
+    # ამიტომ ხელმოწერილი state-ის ვალიდურობა (რომელიც მხოლოდ /connect-ზე
+    # ავტორიზებული მოთხოვნით შეიქმნა) გვცავს გაყალბებული provider_id-სგან.
+    state_data = _verify_state(state)
     provider_id = state_data["provider_id"]
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
@@ -114,7 +147,11 @@ def oauth_callback(
     """)
 
 @router.delete("/disconnect/{provider_id}")
-def disconnect_calendar(provider_id: str, db: Session = Depends(get_db)):
+def disconnect_calendar(
+    provider_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user),
+):
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
@@ -126,7 +163,11 @@ def disconnect_calendar(provider_id: str, db: Session = Depends(get_db)):
     return {"status": "ok", "message": "კალენდარი გათიშულია"}
 
 @router.get("/status/{provider_id}")
-def calendar_status(provider_id: str, db: Session = Depends(get_db)):
+def calendar_status(
+    provider_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user),
+):
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")

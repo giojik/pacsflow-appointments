@@ -33,7 +33,7 @@ def list_slots(
     return q.order_by(Slot.starts_at).all()
 
 @router.post("/", response_model=SlotOut, status_code=201)
-def create_slot(body: SlotCreate, db: Session = Depends(get_db)):
+def create_slot(body: SlotCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     slot = Slot(**body.model_dump())
     db.add(slot)
     db.commit()
@@ -41,7 +41,7 @@ def create_slot(body: SlotCreate, db: Session = Depends(get_db)):
     return slot
 
 @router.post("/bulk", status_code=201)
-def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db)):
+def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """კვირის განრიგიდან ავტომატური სლოტების გენერაცია"""
     from datetime import date
     d_from = date.fromisoformat(body.date_from)
@@ -93,7 +93,7 @@ def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db)):
     return {"created": created, "skipped": skipped}
 
 @router.patch("/{slot_id}", response_model=SlotOut)
-def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db)):
+def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     slot = db.query(Slot).filter(Slot.id == slot_id).first()
     if not slot:
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
@@ -104,7 +104,7 @@ def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db)):
     return slot
 
 @router.delete("/{slot_id}", status_code=204)
-def delete_slot(slot_id: str, db: Session = Depends(get_db)):
+def delete_slot(slot_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     slot = db.query(Slot).filter(Slot.id == slot_id).first()
     if not slot:
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
