@@ -37,7 +37,14 @@ async def upload_image(
 
 @router.get("/static/uploads/{filename}")
 async def get_image(filename: str):
-    filepath = os.path.join(UPLOAD_DIR, filename)
-    if not os.path.exists(filepath):
+    # path traversal დაცვა — მხოლოდ სუფთა ფაილის სახელი (uuid.ext), დირექტორიის გადასვლის გარეშე
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or safe_name in ("", ".", ".."):
+        raise HTTPException(400, "არასწორი ფაილის სახელი")
+    filepath = os.path.join(UPLOAD_DIR, safe_name)
+    if not os.path.exists(filepath) or not os.path.isfile(filepath):
         raise HTTPException(404, "ფაილი ვერ მოიძებნა")
-    return FileResponse(filepath)
+    real_path = os.path.realpath(filepath)
+    if not real_path.startswith(os.path.realpath(UPLOAD_DIR) + os.sep):
+        raise HTTPException(404, "ფაილი ვერ მოიძებნა")
+    return FileResponse(real_path)

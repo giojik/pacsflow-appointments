@@ -4,10 +4,35 @@ from sqlalchemy import and_, or_
 from datetime import datetime, timedelta
 from app.db.session import get_db
 from app.models.slot import Slot, SlotStatus
+from app.models.provider import Provider
+from app.models.user import UserRole
 from app.schemas.slot import SlotCreate, SlotBulkCreate, SlotUpdate, SlotOut
 from app.core.auth import get_current_active_user
 
 router = APIRouter()
+
+
+def _get_provider_or_404(db: Session, provider_id: str) -> Provider:
+    provider = db.query(Provider).filter(Provider.id == provider_id).first()
+    if not provider:
+        raise HTTPException(404, "პროვაიდერი ვერ მოიძებნა")
+    return provider
+
+
+def _check_provider_tenant(provider: Provider, current_user):
+    """superadmin-ს გარდა ყველასთვის — provider უნდა ეკუთვნოდეს current_user-ის tenant-ს"""
+    if current_user.role != UserRole.superadmin and provider.tenant_id != current_user.tenant_id:
+        raise HTTPException(403, "წვდომა აკრძალულია")
+
+
+def _slot_query_scoped(db: Session, slot_id: str, current_user):
+    """slot-ს ვპოულობთ და, superadmin-ს გარდა, ვამოწმებთ რომ provider.tenant_id == current_user.tenant_id"""
+    q = db.query(Slot).filter(Slot.id == slot_id)
+    if current_user.role != UserRole.superadmin:
+        q = q.join(Provider, Provider.id == Slot.provider_id).filter(
+            Provider.tenant_id == current_user.tenant_id
+        )
+    return q
 
 @router.get("/", response_model=list[SlotOut])
 def list_slots(
@@ -18,10 +43,12 @@ def list_slots(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    from app.models.user import UserRole
     # provider role — მხოლოდ საკუთარი სლოტები
     if current_user.role == UserRole.provider and current_user.provider_id:
         provider_id = current_user.provider_id
+
+    provider = _get_provider_or_404(db, provider_id)
+    _check_provider_tenant(provider, current_user)
 
     q = db.query(Slot).filter(Slot.provider_id == provider_id)
     if date_from:
@@ -34,6 +61,9 @@ def list_slots(
 
 @router.post("/", response_model=SlotOut, status_code=201)
 def create_slot(body: SlotCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    provider = _get_provider_or_404(db, body.provider_id)
+    _check_provider_tenant(provider, current_user)
+
     slot = Slot(**body.model_dump())
     db.add(slot)
     db.commit()
@@ -43,6 +73,9 @@ def create_slot(body: SlotCreate, db: Session = Depends(get_db), current_user = 
 @router.post("/bulk", status_code=201)
 def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """კვირის განრიგიდან ავტომატური სლოტების გენერაცია"""
+    provider = _get_provider_or_404(db, body.provider_id)
+    _check_provider_tenant(provider, current_user)
+
     from datetime import date
     d_from = date.fromisoformat(body.date_from)
     d_to   = date.fromisoformat(body.date_to)
@@ -94,7 +127,7 @@ def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db), curre
 
 @router.patch("/{slot_id}", response_model=SlotOut)
 def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
-    slot = db.query(Slot).filter(Slot.id == slot_id).first()
+    slot = _slot_query_scoped(db, slot_id, current_user).first()
     if not slot:
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
     if body.status:
@@ -105,7 +138,7 @@ def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db), c
 
 @router.delete("/{slot_id}", status_code=204)
 def delete_slot(slot_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
-    slot = db.query(Slot).filter(Slot.id == slot_id).first()
+    slot = _slot_query_scoped(db, slot_id, current_user).first()
     if not slot:
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
     if slot.status == SlotStatus.booked:

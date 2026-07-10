@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     QMS_WEBHOOK_URL: str = ""
     QMS_WEBHOOK_SECRET: str = ""
 
+    # CORS — static origin-ები (tenant-ს არ მიეკუთვნება — platform console, საერთო landing).
+    # tenant-ების domain-ები (booking.innovamedical.ge და ა.შ.) DB-ს tenants.domains-იდან
+    # დინამიურად ემატება main.py-ის _get_allowed_origins()-ში — აქ არ უნდა გავიმეოროთ.
+    CORS_ALLOWED_ORIGINS: str = (
+        "https://appointment.pacsflow.ge,"
+        "https://platform.pacsflow.ge"
+    )
+
     class Config:
         env_file = ".env"
 

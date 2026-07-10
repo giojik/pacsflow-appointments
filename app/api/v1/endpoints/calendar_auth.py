@@ -13,11 +13,18 @@ from app.models.provider import Provider, CalendarProvider
 from app.models.tenant import Tenant
 from app.core.config import settings
 from app.core.auth import get_current_active_user
+from app.models.user import UserRole
 import json, base64, urllib.parse, httpx
 
 router = APIRouter()
 
 STATE_TTL_SECONDS = 600  # 10 წუთი — state ვადიანია, callback უნდა დასრულდეს ამ დროში
+
+
+def _check_provider_tenant(provider: Provider, current_user):
+    """superadmin-ს გარდა ყველასთვის — provider უნდა ეკუთვნოდეს current_user-ის tenant-ს"""
+    if current_user.role != UserRole.superadmin and provider.tenant_id != current_user.tenant_id:
+        raise HTTPException(403, "წვდომა აკრძალულია")
 
 
 def _sign_state(payload: dict) -> str:
@@ -89,6 +96,7 @@ def start_oauth(
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
+    _check_provider_tenant(provider, current_user)
     state = _sign_state({
         "provider_id":   provider_id,
         "provider_type": provider_type,
@@ -155,6 +163,7 @@ def disconnect_calendar(
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
+    _check_provider_tenant(provider, current_user)
     provider.calendar_provider      = None
     provider.calendar_id            = None
     provider.calendar_refresh_token = None
@@ -171,6 +180,7 @@ def calendar_status(
     provider = db.query(Provider).filter(Provider.id == provider_id).first()
     if not provider:
         raise HTTPException(404, "Provider ვერ მოიძებნა")
+    _check_provider_tenant(provider, current_user)
     return {
         "connected": bool(provider.calendar_sync_enabled),
         "provider_type": provider.calendar_provider.value if provider.calendar_provider else None,

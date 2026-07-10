@@ -70,6 +70,10 @@ def mark_code_used(code: str, request: Request, db: Session = Depends(get_db)):
     ).first()
     if not record:
         raise HTTPException(status_code=404, detail="კოდი ვერ მოიძებნა")
+    if record.used:
+        raise HTTPException(status_code=409, detail="კოდი უკვე გამოყენებულია")
+    if record.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=410, detail="კოდის ვადა გასულია")
     record.used = True
     db.commit()
     return {"status": "ok"}

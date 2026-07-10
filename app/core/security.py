@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 from datetime import datetime, timedelta
 from typing import Optional
@@ -27,8 +27,10 @@ def decode_token(token: str) -> dict:
 
 # ── appointment code ──────────────────────────────────────────────────────
 def generate_appointment_code() -> str:
+    """კრიპტოგრაფიულად უსაფრთხო generator — secrets, არა random (Mersenne Twister
+    predictable-ია და access code-ისთვის შეუფერებელი)."""
     chars = string.ascii_uppercase + string.digits
-    suffix = "".join(random.choices(chars, k=settings.CODE_LENGTH))
+    suffix = "".join(secrets.choice(chars) for _ in range(settings.CODE_LENGTH))
     return f"{settings.CODE_PREFIX}-{suffix}"
 
 def code_expires_at() -> datetime:

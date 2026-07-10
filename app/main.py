@@ -14,13 +14,57 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+import time as _time
+
+# ── CORS — origin-ების სია: static (config.py) + tenants.domains (DB-დან), 60წმ cache ──
+_cors_cache = {"origins": set(), "ts": 0.0}
+_CORS_CACHE_TTL = 60
+
+def _get_allowed_origins() -> set:
+    now = _time.time()
+    if now - _cors_cache["ts"] > _CORS_CACHE_TTL:
+        from app.db.session import SessionLocal
+        from app.models.tenant import Tenant
+        origins = {o.strip() for o in settings.CORS_ALLOWED_ORIGINS.split(",") if o.strip()}
+        db = SessionLocal()
+        try:
+            for t in db.query(Tenant).filter(Tenant.active == True).all():
+                if not t.domains:
+                    continue
+                for d in t.domains.split(","):
+                    d = d.strip()
+                    if d:
+                        origins.add(f"https://{d}")
+        except Exception as e:
+            print(f"[cors] tenant domains ჩატვირთვის შეცდომა: {e}")
+        finally:
+            db.close()
+        _cors_cache["origins"] = origins
+        _cors_cache["ts"] = now
+    return _cors_cache["origins"]
+
+@app.middleware("http")
+async def dynamic_cors_middleware(request: Request, call_next):
+    origin = request.headers.get("origin")
+    allowed = origin and origin in _get_allowed_origins()
+
+    if request.method == "OPTIONS":
+        from fastapi import Response
+        headers = {}
+        if allowed:
+            headers["Access-Control-Allow-Origin"] = origin
+            headers["Access-Control-Allow-Credentials"] = "true"
+            headers["Access-Control-Allow-Methods"] = "*"
+            req_headers = request.headers.get("access-control-request-headers")
+            headers["Access-Control-Allow-Headers"] = req_headers if req_headers else "*"
+        return Response(status_code=200, headers=headers)
+
+    response = await call_next(request)
+    if allowed:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
 
 os.makedirs("/app/static/uploads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="/app/static"), name="static")

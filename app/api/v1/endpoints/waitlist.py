@@ -5,13 +5,34 @@ from typing import Optional
 from datetime import datetime, timedelta
 from app.db.session import get_db
 from app.models.waitlist import Waitlist, WaitlistStatus
-from app.core.auth import get_current_active_user
+from app.models.client import Client
+from app.models.provider import Provider
+from app.models.user import UserRole
+from app.core.auth import get_current_active_user, require_tenant_access
 from app.models.user import User
 
 router = APIRouter()
 
+
+def _resolve_tenant_id(current_user, requested_tenant_id: str | None) -> str:
+    """superadmin-ს შეუძლია ნებისმიერი tenant_id, დანარჩენებს — მხოლოდ საკუთარი"""
+    if current_user.role == UserRole.superadmin:
+        if not requested_tenant_id:
+            raise HTTPException(400, "tenant_id აუცილებელია")
+        return requested_tenant_id
+    if requested_tenant_id and requested_tenant_id != current_user.tenant_id:
+        raise HTTPException(403, "წვდომა აკრძალულია")
+    return current_user.tenant_id
+
+
+def _waitlist_query_scoped(db: Session, waitlist_id: str, current_user):
+    q = db.query(Waitlist).filter(Waitlist.id == waitlist_id)
+    if current_user.role != UserRole.superadmin:
+        q = q.filter(Waitlist.tenant_id == current_user.tenant_id)
+    return q
+
 class WaitlistCreate(BaseModel):
-    tenant_id:          str
+    tenant_id:          Optional[str] = None
     client_id:          str
     provider_id:        str
     service_id:         Optional[str] = None
@@ -55,6 +76,7 @@ def list_waitlist(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
+    require_tenant_access(tenant_id, current_user)
     q = db.query(Waitlist).filter(Waitlist.tenant_id == tenant_id)
     if provider_id:
         q = q.filter(Waitlist.provider_id == provider_id)
@@ -65,7 +87,19 @@ def list_waitlist(
 @router.post("/", status_code=201)
 def add_to_waitlist(body: WaitlistCreate, db: Session = Depends(get_db),
                     current_user: User = Depends(get_current_active_user)):
-    w = Waitlist(**{k: v for k, v in body.model_dump().items()})
+    tenant_id = _resolve_tenant_id(current_user, body.tenant_id)
+
+    client = db.query(Client).filter(Client.id == body.client_id).first()
+    if not client or client.tenant_id != tenant_id:
+        raise HTTPException(404, "კლიენტი ვერ მოიძებნა")
+
+    provider = db.query(Provider).filter(Provider.id == body.provider_id).first()
+    if not provider or provider.tenant_id != tenant_id:
+        raise HTTPException(404, "პროვაიდერი ვერ მოიძებნა")
+
+    data = body.model_dump()
+    data["tenant_id"] = tenant_id
+    w = Waitlist(**data)
     db.add(w)
     db.commit()
     db.refresh(w)
@@ -74,7 +108,7 @@ def add_to_waitlist(body: WaitlistCreate, db: Session = Depends(get_db),
 @router.delete("/{waitlist_id}", status_code=204)
 def remove_from_waitlist(waitlist_id: str, db: Session = Depends(get_db),
                           current_user: User = Depends(get_current_active_user)):
-    w = db.query(Waitlist).filter(Waitlist.id == waitlist_id).first()
+    w = _waitlist_query_scoped(db, waitlist_id, current_user).first()
     if not w:
         raise HTTPException(404, "ვერ მოიძებნა")
     db.delete(w)

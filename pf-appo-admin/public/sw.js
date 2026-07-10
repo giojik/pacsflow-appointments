@@ -1,5 +1,5 @@
-const CACHE_NAME = 'pacsflow-v2';
-const PRECACHE = ['/app', '/login'];
+const CACHE_NAME = 'pacsflow-v3';
+const PRECACHE = []; // HTML აღარ pre-cache-დება — იხ. ახსნა ქვემოთ
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -18,9 +18,31 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // API calls — network only
+  // API calls — network only, არასდროს ქეშირდება
   if (e.request.url.includes('/api/')) return;
 
+  // HTML/navigation (index.html, /app, /login) — ყოველთვის network-only.
+  // ეს გვერდი აკავშირებს hashed JS/CSS bundle-ებთან; მისი ქეშირება deploy-ის
+  // შემდეგ ძველი, შესაძლოა უკვე წაშლილი, bundle-ის მისამართებზე მიგვიყვანდა.
+  const isNavigation =
+    e.request.mode === 'navigate' ||
+    (e.request.headers.get('accept') || '').includes('text/html');
+
+  if (isNavigation) {
+    e.respondWith(
+      fetch(e.request).catch(() =>
+        new Response(
+          '<h1>კავშირი დროებით მიუწვდომელია</h1><p>გთხოვთ, სცადოთ თავიდან რამდენიმე წამში.</p>',
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' }, status: 503 }
+        )
+      )
+    );
+    return;
+  }
+
+  // hashed static assets (JS/CSS/images) — network-first, cache fallback.
+  // Vite-ის build hash-ი თავისთავად უზრუნველყოფს, რომ ახალი deploy ახალ
+  // URL-ს გამოიყენებს, ასე რომ staleness აქ პრობლემა არაა.
   e.respondWith(
     fetch(e.request)
       .then(response => {

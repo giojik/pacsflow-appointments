@@ -57,7 +57,10 @@ def mark_read(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    n = db.query(Notification).filter(Notification.id == notification_id).first()
+    n = db.query(Notification).filter(
+        Notification.id == notification_id,
+        Notification.tenant_id == current_user.tenant_id,
+    ).first()
     if n:
         n.read = True
         db.commit()
