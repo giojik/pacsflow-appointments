@@ -18,6 +18,8 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
+  // GET-ის გარდა ყველაფერი — network only, Cache API მხოლოდ GET-ს უჭერს მხარს
+  if (e.request.method !== 'GET') return;
   // API calls — network only, არასდროს ქეშირდება
   if (e.request.url.includes('/api/')) return;
 
