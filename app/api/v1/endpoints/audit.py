@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, require_tenant_access
 from app.models.audit import AuditLog
 from app.models.user import UserRole
 
@@ -38,6 +38,7 @@ def list_audit(
 ):
     if current_user.role not in (UserRole.superadmin, UserRole.admin):
         raise HTTPException(403, "წვდომა აკრძალულია")
+    require_tenant_access(tenant_id, current_user)   # <-- დამატება
 
     q = db.query(AuditLog).filter(AuditLog.tenant_id == tenant_id)
 

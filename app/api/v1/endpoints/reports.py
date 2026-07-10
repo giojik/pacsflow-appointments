@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, require_tenant_access
 from app.models.appointment import Appointment, AppointmentStatus
 from app.models.slot import Slot
 from app.models.client import Client
@@ -112,6 +112,7 @@ def report_list(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user),
 ):
+    require_tenant_access(tenant_id, current_user)
     q = _base_query(db, current_user, tenant_id, date_from, date_to,
                     provider_id, service_id, status)
 
@@ -165,6 +166,7 @@ def report_export(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user),
 ):
+    require_tenant_access(tenant_id, current_user)
     q = _base_query(db, current_user, tenant_id, date_from, date_to,
                     provider_id, service_id, status)
     rows = [_row(*r) for r in q.all()]

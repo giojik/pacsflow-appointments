@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Any
 from app.db.session import get_db
 from app.models.base import Base, TimestampMixin, gen_uuid
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, require_tenant_access
 from app.models.user import User
 from fastapi import Request
 
@@ -34,6 +34,7 @@ def get_or_create(tenant_id: str, db: Session) -> TenantSettings:
 @router.get("/{tenant_id}")
 def get_settings(tenant_id: str, db: Session = Depends(get_db),
                  current_user: User = Depends(get_current_active_user)):
+    require_tenant_access(tenant_id, current_user)
     obj = get_or_create(tenant_id, db)
     return json.loads(obj.settings)
 
@@ -41,12 +42,14 @@ def get_settings(tenant_id: str, db: Session = Depends(get_db),
 def update_settings(tenant_id: str, body: SettingsUpdate,
                     db: Session = Depends(get_db),
                     current_user: User = Depends(get_current_active_user)):
+    require_tenant_access(tenant_id, current_user)
     obj = get_or_create(tenant_id, db)
     current = json.loads(obj.settings)
     current.update(body.settings)
     obj.settings = json.dumps(current)
     db.commit()
     return current
+
 @router.get("/public/branding")
 def get_public_branding(request: Request, db: Session = Depends(get_db)):
     """Public endpoint — authorization გარეშე, დომეინის მიხედვით"""

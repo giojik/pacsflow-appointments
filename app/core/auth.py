@@ -55,3 +55,13 @@ require_admin        = require_roles(UserRole.admin, UserRole.superadmin)
 require_receptionist = require_roles(UserRole.admin, UserRole.superadmin, UserRole.receptionist)
 require_provider     = require_roles(UserRole.admin, UserRole.superadmin, UserRole.receptionist, UserRole.provider)
 require_superadmin   = require_roles(UserRole.superadmin)
+
+def require_tenant_access(tenant_id: str, current_user: User) -> None:
+    """
+    superadmin-ს (tenant_id=None) წვდომა აქვს ყველა tenant-ზე.
+    ყველა დანარჩენს — მხოლოდ საკუთარ tenant_id-ზე.
+    """
+    if current_user.role == UserRole.superadmin:
+        return
+    if str(current_user.tenant_id) != str(tenant_id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "წვდომა აკრძალულია — სხვა tenant")
