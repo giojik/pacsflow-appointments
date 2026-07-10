@@ -4,11 +4,31 @@ from datetime import datetime
 from app.db.session import get_db
 from app.models.appointment import Appointment, AppointmentCode, AppointmentStatus
 from app.models.slot import Slot, SlotStatus
+from app.models.provider import Provider
+from app.models.user import UserRole
 from app.core.security import generate_appointment_code, code_expires_at
 from app.core.auth import get_current_active_user
 from app.schemas.appointment import AppointmentCreate, AppointmentUpdate, AppointmentOut
 
 router = APIRouter()
+
+
+def _resolve_tenant_id(current_user, requested_tenant_id: str | None) -> str:
+    """superadmin-ს შეუძლია ნებისმიერი tenant_id, დანარჩენებს — მხოლოდ საკუთარი"""
+    if current_user.role == UserRole.superadmin:
+        if not requested_tenant_id:
+            raise HTTPException(400, "tenant_id აუცილებელია")
+        return requested_tenant_id
+    if requested_tenant_id and requested_tenant_id != current_user.tenant_id:
+        raise HTTPException(403, "წვდომა აკრძალულია")
+    return current_user.tenant_id
+
+
+def _appointment_query(db: Session, appointment_id: str, current_user):
+    q = db.query(Appointment).filter(Appointment.id == appointment_id)
+    if current_user.role != UserRole.superadmin:
+        q = q.filter(Appointment.tenant_id == current_user.tenant_id)
+    return q
 
 
 def _get_client_ip(request: Request) -> str:
@@ -135,7 +155,7 @@ def _enrich(a: Appointment) -> dict:
 
 @router.get("/", response_model=list[AppointmentOut])
 def list_appointments(
-    tenant_id:   str = Query(...),
+    tenant_id:   str | None = Query(None),
     provider_id: str | None = Query(None),
     client_id:   str | None = Query(None),
     status:      AppointmentStatus | None = None,
@@ -145,7 +165,7 @@ def list_appointments(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    from app.models.user import UserRole
+    tenant_id = _resolve_tenant_id(current_user, tenant_id)
     q = db.query(Appointment).filter(Appointment.tenant_id == tenant_id)
 
     needs_slot_join = bool(
@@ -182,21 +202,36 @@ def list_appointments(
     return [_enrich(a) for a in q.order_by(Appointment.created_at.desc()).all()]
 
 @router.get("/{appointment_id}", response_model=AppointmentOut)
-def get_appointment(appointment_id: str, db: Session = Depends(get_db)):
-    a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+def get_appointment(
+    appointment_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    a = _appointment_query(db, appointment_id, current_user).first()
     if not a:
         raise HTTPException(404, "ჩაწერა ვერ მოიძებნა")
     return _enrich(a)
 
 @router.post("/", response_model=AppointmentOut, status_code=201)
-def create_appointment(body: AppointmentCreate, db: Session = Depends(get_db)):
+def create_appointment(
+    body: AppointmentCreate,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    data = body.model_dump()
+    tenant_id = _resolve_tenant_id(current_user, data.get("tenant_id"))
+    data["tenant_id"] = tenant_id
+
     slot = db.query(Slot).filter(Slot.id == body.slot_id).first()
     if not slot:
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
     if slot.status != SlotStatus.available:
         raise HTTPException(409, "სლოტი დაკავებულია")
+    provider = db.query(Provider).filter(Provider.id == slot.provider_id).first()
+    if not provider or provider.tenant_id != tenant_id:
+        raise HTTPException(404, "სლოტი ვერ მოიძებნა")
 
-    appt = Appointment(**body.model_dump())
+    appt = Appointment(**data)
     db.add(appt)
     db.flush()
 
@@ -223,7 +258,7 @@ def update_appointment(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    a = _appointment_query(db, appointment_id, current_user).first()
     if not a:
         raise HTTPException(404, "ჩაწერა ვერ მოიძებნა")
 
@@ -238,7 +273,9 @@ def update_appointment(
 
     _stamp_modification(a, request, current_user)
 
-    for k, v in body.model_dump(exclude_none=True).items():
+    update_data = body.model_dump(exclude_none=True)
+    update_data.pop("tenant_id", None)
+    for k, v in update_data.items():
         setattr(a, k, v)
     db.commit()
     db.refresh(a)
@@ -259,7 +296,7 @@ def reschedule_appointment(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
-    a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    a = _appointment_query(db, appointment_id, current_user).first()
     if not a:
         raise HTTPException(404, "ჩაწერა ვერ მოიძებნა")
     if a.status in (AppointmentStatus.cancelled, AppointmentStatus.completed):
@@ -270,6 +307,9 @@ def reschedule_appointment(
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
     if new_slot.status != SlotStatus.available:
         raise HTTPException(409, "სლოტი დაკავებულია")
+    new_provider = db.query(Provider).filter(Provider.id == new_slot.provider_id).first()
+    if not new_provider or new_provider.tenant_id != a.tenant_id:
+        raise HTTPException(404, "სლოტი ვერ მოიძებნა")
 
     a.slot.status = SlotStatus.available
     new_slot.status = SlotStatus.booked
@@ -285,8 +325,12 @@ def reschedule_appointment(
     return _enrich(a)
 
 @router.post("/{appointment_id}/resend-code", response_model=dict)
-def resend_code(appointment_id: str, db: Session = Depends(get_db)):
-    a = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+def resend_code(
+    appointment_id: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    a = _appointment_query(db, appointment_id, current_user).first()
     if not a:
         raise HTTPException(404, "ჩაწერა ვერ მოიძებნა")
     if a.status in (AppointmentStatus.cancelled, AppointmentStatus.completed):
