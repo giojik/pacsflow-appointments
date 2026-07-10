@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -83,8 +83,22 @@ class UserUpdate(BaseModel):
     password:    Optional[str] = None
 
 # ── login ─────────────────────────────────────────────────────────────────
+def _check_domain_tenant_match(request: Request, user: User, db: Session) -> None:
+    """მომხმარებელს (superadmin გამონაკლისია) login მხოლოდ საკუთარი tenant-ის
+    domain-იდან შეუძლია — თორემ booking.innovamedical.ge-ის იუზერი
+    booking.innovainvitro.ge-ის login გვერდიდანაც შევა (domain-ს დამცავი
+    ფუნქცია არ ექნება)."""
+    if not user.tenant_id:
+        return  # superadmin / global user
+    from app.core.tenant import resolve_slug
+    slug = resolve_slug(request, db)
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    if not tenant or tenant.slug != slug:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
+
+
 @router.post("/login", response_model=TokenOut)
-def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     check_brute_force(form.username)
 
     user = db.query(User).filter(
@@ -94,6 +108,7 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     ).first()
 
     if user and user.hashed_password and verify_password(form.password, user.hashed_password):
+        _check_domain_tenant_match(request, user, db)
         record_success(form.username)
 
     elif settings.LDAP_ENABLED:

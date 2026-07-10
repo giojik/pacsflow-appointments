@@ -1,0 +1,299 @@
+From a26f1497ca55051a1d847572a6d720ba84618973 Mon Sep 17 00:00:00 2001
+From: giojik <giojik@gmail.com>
+Date: Fri, 10 Jul 2026 07:42:12 +0400
+Subject: [PATCH] =?UTF-8?q?security:=20auth-=E1=83=98=E1=83=A1=20=E1=83=93?=
+ =?UTF-8?q?=E1=83=90=E1=83=9C=E1=83=90=E1=83=A0=E1=83=A9=E1=83=94=E1=83=9C?=
+ =?UTF-8?q?=E1=83=98=20=E1=83=AE=E1=83=90=E1=83=A0=E1=83=95=E1=83=94?=
+ =?UTF-8?q?=E1=83=96=E1=83=94=E1=83=91=E1=83=98=E1=83=A1=20=E1=83=92?=
+ =?UTF-8?q?=E1=83=90=E1=83=9B=E1=83=9D=E1=83=A1=E1=83=AC=E1=83=9D=E1=83=A0?=
+ =?UTF-8?q?=E1=83=94=E1=83=91=E1=83=90?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+(appointments/clients/providers/services უკვე დაფარულია
+f2fe9de-ის IDOR ფიქსით — ეს commit მხოლოდ დარჩენილ ნაწილს ეხება)
+
+- slots: auth create/bulk/update/delete-ზე
+- calendar_auth: auth connect/disconnect/status-ზე + HMAC-ხელმოწერილი
+  OAuth state, რომ callback ვერ გაყალბდეს
+- auth: seed-superadmin დაცულია SETUP_SECRET-ით, generated password
+- codes: IP rate-limit verify/use endpoint-ებზე
+---
+ app/api/v1/endpoints/auth.py          | 15 ++++---
+ app/api/v1/endpoints/calendar_auth.py | 57 +++++++++++++++++++++++----
+ app/api/v1/endpoints/codes.py         | 34 ++++++++++++++--
+ app/api/v1/endpoints/slots.py         |  8 ++--
+ app/core/config.py                    |  1 +
+ 5 files changed, 95 insertions(+), 20 deletions(-)
+
+diff --git a/app/api/v1/endpoints/auth.py b/app/api/v1/endpoints/auth.py
+index 0cfe835..b2d77ec 100644
+--- a/app/api/v1/endpoints/auth.py
++++ b/app/api/v1/endpoints/auth.py
+@@ -1,4 +1,4 @@
+-from fastapi import APIRouter, Depends, HTTPException, status
++from fastapi import APIRouter, Depends, HTTPException, status, Query
+ from fastapi.security import OAuth2PasswordRequestForm
+ from sqlalchemy.orm import Session
+ from pydantic import BaseModel
+@@ -197,14 +197,19 @@ def update_user(
+     return user
+ 
+ @router.post("/users/seed-superadmin", status_code=201)
+-def seed_superadmin(db: Session = Depends(get_db)):
+-    """პირველი გაშვებისას superadmin-ის შექმნა"""
++def seed_superadmin(setup_secret: str = Query(...), db: Session = Depends(get_db)):
++    """პირველი გაშვებისას superadmin-ის შექმნა — მოითხოვს SETUP_SECRET env ცვლადს.
++    თუ SETUP_SECRET დაყენებული არაა, endpoint მთლიანად გამორთულია."""
++    if not settings.SETUP_SECRET or setup_secret != settings.SETUP_SECRET:
++        raise HTTPException(403, "წვდომა აკრძალულია")
+     existing = db.query(User).filter(User.role == UserRole.superadmin).first()
+     if existing:
+         raise HTTPException(409, "Superadmin უკვე არსებობს")
++    import secrets
++    generated_password = secrets.token_urlsafe(16)
+     user = User(
+         username="superadmin",
+-        hashed_password=hash_password("changeme123"),
++        hashed_password=hash_password(generated_password),
+         role=UserRole.superadmin,
+         auth_provider=AuthProvider.local,
+         full_name="Super Admin",
+@@ -212,4 +217,4 @@ def seed_superadmin(db: Session = Depends(get_db)):
+     )
+     db.add(user)
+     db.commit()
+-    return {"username": "superadmin", "password": "changeme123", "message": "პაროლი შეიცვალე!"}
+\ No newline at end of file
++    return {"username": "superadmin", "password": generated_password, "message": "პაროლი შეინახე და დაუყოვნებლივ შეცვალე!"}
+\ No newline at end of file
+diff --git a/app/api/v1/endpoints/calendar_auth.py b/app/api/v1/endpoints/calendar_auth.py
+index c85429d..b5de1c3 100644
+--- a/app/api/v1/endpoints/calendar_auth.py
++++ b/app/api/v1/endpoints/calendar_auth.py
+@@ -1,6 +1,10 @@
+ """
+ Calendar OAuth endpoints — platform-level
+ """
++import hashlib
++import hmac
++import time
++
+ from fastapi import APIRouter, Depends, HTTPException, Query, Request
+ from fastapi.responses import RedirectResponse, HTMLResponse
+ from sqlalchemy.orm import Session
+@@ -8,10 +12,38 @@ from app.db.session import get_db
+ from app.models.provider import Provider, CalendarProvider
+ from app.models.tenant import Tenant
+ from app.core.config import settings
++from app.core.auth import get_current_active_user
+ import json, base64, urllib.parse, httpx
+ 
+ router = APIRouter()
+ 
++STATE_TTL_SECONDS = 600  # 10 წუთი — state ვადიანია, callback უნდა დასრულდეს ამ დროში
++
++
++def _sign_state(payload: dict) -> str:
++    """State-ს ვხატავთ HMAC ხელმოწერით, რომ callback-ზე ვერავინ ვერ გააყალბოს provider_id."""
++    payload = {**payload, "ts": time.time()}
++    raw = json.dumps(payload, sort_keys=True).encode()
++    sig = hmac.new(settings.SECRET_KEY.encode(), raw, hashlib.sha256).hexdigest()
++    state = {"data": base64.urlsafe_b64encode(raw).decode(), "sig": sig}
++    return base64.urlsafe_b64encode(json.dumps(state).encode()).decode()
++
++
++def _verify_state(state: str) -> dict:
++    try:
++        outer = json.loads(base64.urlsafe_b64decode(state + "=="))
++        raw = base64.urlsafe_b64decode(outer["data"] + "==")
++        expected_sig = hmac.new(settings.SECRET_KEY.encode(), raw, hashlib.sha256).hexdigest()
++        if not hmac.compare_digest(expected_sig, outer["sig"]):
++            raise ValueError("bad signature")
++        payload = json.loads(raw)
++        if time.time() - payload.get("ts", 0) > STATE_TTL_SECONDS:
++            raise ValueError("expired state")
++        return payload
++    except Exception:
++        raise HTTPException(400, "არასწორი ან ვადაგასული state პარამეტრი")
++
++
+ def _google_auth_url(state: str) -> str:
+     params = {
+         "client_id":     settings.GOOGLE_CLIENT_ID,
+@@ -50,16 +82,17 @@ def start_oauth(
+     provider_type: str,
+     provider_id: str = Query(...),
+     db: Session = Depends(get_db),
++    current_user = Depends(get_current_active_user),
+ ):
+     if provider_type != "google":
+         raise HTTPException(400, "ამჟამად მხოლოდ Google Calendar-ია მხარდაჭერილი")
+     provider = db.query(Provider).filter(Provider.id == provider_id).first()
+     if not provider:
+         raise HTTPException(404, "Provider ვერ მოიძებნა")
+-    state = base64.urlsafe_b64encode(json.dumps({
++    state = _sign_state({
+         "provider_id":   provider_id,
+         "provider_type": provider_type,
+-    }).encode()).decode()
++    })
+     return RedirectResponse(_google_auth_url(state))
+ 
+ @router.get("/callback")
+@@ -68,10 +101,10 @@ def oauth_callback(
+     state: str = Query(...),
+     db: Session = Depends(get_db)
+ ):
+-    try:
+-        state_data = json.loads(base64.urlsafe_b64decode(state + "=="))
+-    except Exception:
+-        raise HTTPException(400, "არასწორი state პარამეტრი")
++    # callback მოდის Google-დან ბრაუზერის რედირექტით — Bearer token ვერ გამოგვადგება,
++    # ამიტომ ხელმოწერილი state-ის ვალიდურობა (რომელიც მხოლოდ /connect-ზე
++    # ავტორიზებული მოთხოვნით შეიქმნა) გვცავს გაყალბებული provider_id-სგან.
++    state_data = _verify_state(state)
+     provider_id = state_data["provider_id"]
+     provider = db.query(Provider).filter(Provider.id == provider_id).first()
+     if not provider:
+@@ -114,7 +147,11 @@ def oauth_callback(
+     """)
+ 
+ @router.delete("/disconnect/{provider_id}")
+-def disconnect_calendar(provider_id: str, db: Session = Depends(get_db)):
++def disconnect_calendar(
++    provider_id: str,
++    db: Session = Depends(get_db),
++    current_user = Depends(get_current_active_user),
++):
+     provider = db.query(Provider).filter(Provider.id == provider_id).first()
+     if not provider:
+         raise HTTPException(404, "Provider ვერ მოიძებნა")
+@@ -126,7 +163,11 @@ def disconnect_calendar(provider_id: str, db: Session = Depends(get_db)):
+     return {"status": "ok", "message": "კალენდარი გათიშულია"}
+ 
+ @router.get("/status/{provider_id}")
+-def calendar_status(provider_id: str, db: Session = Depends(get_db)):
++def calendar_status(
++    provider_id: str,
++    db: Session = Depends(get_db),
++    current_user = Depends(get_current_active_user),
++):
+     provider = db.query(Provider).filter(Provider.id == provider_id).first()
+     if not provider:
+         raise HTTPException(404, "Provider ვერ მოიძებნა")
+diff --git a/app/api/v1/endpoints/codes.py b/app/api/v1/endpoints/codes.py
+index f475795..e97d23a 100644
+--- a/app/api/v1/endpoints/codes.py
++++ b/app/api/v1/endpoints/codes.py
+@@ -1,4 +1,7 @@
+-from fastapi import APIRouter, Depends, HTTPException
++import time
++from collections import defaultdict
++
++from fastapi import APIRouter, Depends, HTTPException, Request
+ from sqlalchemy.orm import Session
+ from datetime import datetime
+ from app.db.session import get_db
+@@ -6,9 +9,32 @@ from app.models.appointment import AppointmentCode
+ 
+ router = APIRouter()
+ 
++# ── IP-ზე დაფუძნებული rate limit (იგივე პატერნი რაც public_booking.py-ში) ──
++_RATE: dict[str, list[float]] = defaultdict(list)
++RATE_LIMIT = 20     # მაქს. ცდა
++RATE_WINDOW = 60    # წამში
++
++
++def _client_ip(request: Request) -> str:
++    return (request.headers.get("cf-connecting-ip", "")
++            or request.headers.get("x-real-ip", "")
++            or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
++            or (request.client.host if request.client else "unknown"))
++
++
++def _check_rate(ip: str):
++    now = time.time()
++    _RATE[ip] = [t for t in _RATE[ip] if now - t < RATE_WINDOW]
++    if len(_RATE[ip]) >= RATE_LIMIT:
++        raise HTTPException(429, "ძალიან ბევრი მცდელობა. სცადეთ მოგვიანებით.")
++    _RATE[ip].append(now)
++
++
+ @router.get("/{code}/verify")
+-def verify_code(code: str, db: Session = Depends(get_db)):
++def verify_code(code: str, request: Request, db: Session = Depends(get_db)):
+     """QMS კიოსკი ამ endpoint-ს იძახებს კოდის შეყვანისას"""
++    _check_rate(_client_ip(request))
++
+     record = db.query(AppointmentCode).filter(
+         AppointmentCode.code == code.upper(),
+         AppointmentCode.used == False,
+@@ -35,8 +61,10 @@ def verify_code(code: str, db: Session = Depends(get_db)):
+     }
+ 
+ @router.post("/{code}/use")
+-def mark_code_used(code: str, db: Session = Depends(get_db)):
++def mark_code_used(code: str, request: Request, db: Session = Depends(get_db)):
+     """QMS ბილეთის გაცემის შემდეგ კოდს მოხმარებულად ნიშნავს"""
++    _check_rate(_client_ip(request))
++
+     record = db.query(AppointmentCode).filter(
+         AppointmentCode.code == code.upper()
+     ).first()
+diff --git a/app/api/v1/endpoints/slots.py b/app/api/v1/endpoints/slots.py
+index e611ca4..936692a 100644
+--- a/app/api/v1/endpoints/slots.py
++++ b/app/api/v1/endpoints/slots.py
+@@ -33,7 +33,7 @@ def list_slots(
+     return q.order_by(Slot.starts_at).all()
+ 
+ @router.post("/", response_model=SlotOut, status_code=201)
+-def create_slot(body: SlotCreate, db: Session = Depends(get_db)):
++def create_slot(body: SlotCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+     slot = Slot(**body.model_dump())
+     db.add(slot)
+     db.commit()
+@@ -41,7 +41,7 @@ def create_slot(body: SlotCreate, db: Session = Depends(get_db)):
+     return slot
+ 
+ @router.post("/bulk", status_code=201)
+-def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db)):
++def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+     """კვირის განრიგიდან ავტომატური სლოტების გენერაცია"""
+     from datetime import date
+     d_from = date.fromisoformat(body.date_from)
+@@ -93,7 +93,7 @@ def bulk_create_slots(body: SlotBulkCreate, db: Session = Depends(get_db)):
+     return {"created": created, "skipped": skipped}
+ 
+ @router.patch("/{slot_id}", response_model=SlotOut)
+-def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db)):
++def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+     slot = db.query(Slot).filter(Slot.id == slot_id).first()
+     if not slot:
+         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
+@@ -104,7 +104,7 @@ def update_slot(slot_id: str, body: SlotUpdate, db: Session = Depends(get_db)):
+     return slot
+ 
+ @router.delete("/{slot_id}", status_code=204)
+-def delete_slot(slot_id: str, db: Session = Depends(get_db)):
++def delete_slot(slot_id: str, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+     slot = db.query(Slot).filter(Slot.id == slot_id).first()
+     if not slot:
+         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
+diff --git a/app/core/config.py b/app/core/config.py
+index ee56303..158edc2 100644
+--- a/app/core/config.py
++++ b/app/core/config.py
+@@ -4,6 +4,7 @@ from typing import Optional
+ class Settings(BaseSettings):
+     APP_ENV: str = "development"
+     SECRET_KEY: str = "change-me-in-production"
++    SETUP_SECRET: str = ""  # seed-superadmin-ისთვის — production-ში ENV-ით უნდა დაყენდეს
+     API_V1_STR: str = "/api/v1"
+     DATABASE_URL: str = "postgresql://pacsflow:pacsflow@db:5432/pacsflow_appointments"
+ 
+-- 
+2.34.1
+
