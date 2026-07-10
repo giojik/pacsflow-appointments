@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import update
 from datetime import datetime
 from app.db.session import get_db
 from app.models.appointment import Appointment, AppointmentCode, AppointmentStatus
@@ -241,7 +242,17 @@ def create_appointment(
         expires_at=code_expires_at(),
     )
     db.add(code)
-    slot.status = SlotStatus.booked
+
+    # ატომური conditional UPDATE — race condition-ის დაცვა.
+    lock_result = db.execute(
+        update(Slot)
+        .where(Slot.id == slot.id, Slot.status == SlotStatus.available)
+        .values(status=SlotStatus.booked)
+    )
+    if lock_result.rowcount == 0:
+        db.rollback()
+        raise HTTPException(409, "სლოტი დაკავებულია")
+
     db.commit()
     db.refresh(appt)
 
@@ -311,8 +322,21 @@ def reschedule_appointment(
     if not new_provider or new_provider.tenant_id != a.tenant_id:
         raise HTTPException(404, "სლოტი ვერ მოიძებნა")
 
-    a.slot.status = SlotStatus.available
-    new_slot.status = SlotStatus.booked
+    old_slot_id = a.slot_id
+
+    # ატომური conditional UPDATE ახალ slot-ზე — race condition-ის დაცვა.
+    lock_result = db.execute(
+        update(Slot)
+        .where(Slot.id == new_slot.id, Slot.status == SlotStatus.available)
+        .values(status=SlotStatus.booked)
+    )
+    if lock_result.rowcount == 0:
+        db.rollback()
+        raise HTTPException(409, "სლოტი დაკავებულია")
+
+    db.execute(
+        update(Slot).where(Slot.id == old_slot_id).values(status=SlotStatus.available)
+    )
     a.slot_id = slot_id
     _stamp_modification(a, request, current_user)
 

@@ -6,6 +6,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import update
 
 from app.db.session import get_db
 from app.core.tenant import resolve_slug
@@ -198,8 +199,19 @@ def public_book(request: Request, body: BookingCreate, db: Session = Depends(get
         status=AppointmentStatus.pending,
         notes=(body.notes or "").strip() or None,
     )
-    slot.status = SlotStatus.booked
     db.add(appt)
+
+    # ატომური conditional UPDATE — race condition-ის დაცვა.
+    # თუ slot-ი ამასობაში სხვამ დაიკავა, rowcount იქნება 0.
+    lock_result = db.execute(
+        update(Slot)
+        .where(Slot.id == slot.id, Slot.status == SlotStatus.available)
+        .values(status=SlotStatus.booked)
+    )
+    if lock_result.rowcount == 0:
+        db.rollback()
+        raise HTTPException(409, "ეს დრო უკვე დაკავებულია. აირჩიეთ სხვა.")
+
     db.commit()
     db.refresh(appt)
 
