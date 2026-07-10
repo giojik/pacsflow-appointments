@@ -9,7 +9,7 @@ from app.db.session import get_db
 from app.models.user import User, UserRole, AuthProvider
 from app.models.tenant import Tenant
 from app.core.security import verify_password, hash_password, create_access_token
-from app.core.auth import get_current_active_user, require_superadmin
+from app.core.auth import get_current_active_user, require_superadmin, require_tenant_access
 from app.core.config import settings
 
 router = APIRouter()
@@ -151,6 +151,17 @@ def create_user(
     if db.query(User).filter(User.username == body.username).first():
         raise HTTPException(409, "მომხმარებელი უკვე არსებობს")
 
+    # privilege escalation დაცვა — superadmin მხოლოდ არსებულ superadmin-ს შეუძლია შექმნას
+    if body.role == UserRole.superadmin and current_user.role != UserRole.superadmin:
+        raise HTTPException(403, "მხოლოდ superadmin-ს შეუძლია superadmin-ის შექმნა")
+
+    # tenant scoping — tenant admin-ს არ შეუძლია სხვა tenant-ზე ან გლობალურ (tenant_id=None)
+    # მომხმარებლის შექმნა; superadmin-მა შეიძლება ცალსახად მიუთითოს tenant_id ან None
+    if current_user.role == UserRole.superadmin:
+        tenant_id = body.tenant_id
+    else:
+        tenant_id = current_user.tenant_id
+
     # password policy
     if body.password and len(body.password) < 8:
         raise HTTPException(400, "პაროლი მინიმუმ 8 სიმბოლო უნდა იყოს")
@@ -160,7 +171,7 @@ def create_user(
         email=body.email,
         full_name=body.full_name,
         role=body.role,
-        tenant_id=body.tenant_id or current_user.tenant_id,
+        tenant_id=tenant_id,
         provider_id=body.provider_id,
         auth_provider=AuthProvider.local,
         hashed_password=hash_password(body.password) if body.password else None,
@@ -182,6 +193,13 @@ def update_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, "მომხმარებელი ვერ მოიძებნა")
+
+    # tenant admin-ს შეუძლია მხოლოდ საკუთარი tenant-ის მომხმარებლების რედაქტირება
+    require_tenant_access(user.tenant_id, current_user)
+
+    # privilege escalation დაცვა — superadmin role-ის მინიჭება მხოლოდ superadmin-ს შეუძლია
+    if body.role == UserRole.superadmin and current_user.role != UserRole.superadmin:
+        raise HTTPException(403, "მხოლოდ superadmin-ს შეუძლია superadmin role-ის მინიჭება")
 
     for k, v in body.model_dump(exclude_none=True, exclude={"password"}).items():
         setattr(user, k, v)
