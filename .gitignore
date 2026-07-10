@@ -13,3 +13,4 @@ pf-appo-admin/node_modules/
 *.swp
 *.swo
 *~
+import_data/*.json
