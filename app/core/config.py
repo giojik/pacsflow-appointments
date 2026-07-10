@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     SECRET_KEY: str = "change-me-in-production"
     SETUP_SECRET: str = ""  # seed-superadmin-ისთვის — production-ში ENV-ით უნდა დაყენდეს
+    DOCS_SECRET: str = ""  # /docs, /redoc, /openapi.json-ზე წვდომისთვის — production-ში ENV-ით უნდა დაყენდეს
     API_V1_STR: str = "/api/v1"
     DATABASE_URL: str = "postgresql://pacsflow:pacsflow@db:5432/pacsflow_appointments"
 

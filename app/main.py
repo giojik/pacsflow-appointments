@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
@@ -10,8 +10,9 @@ import os
 app = FastAPI(
     title="PacsFlow Appointments",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 import time as _time
@@ -352,6 +353,39 @@ async def audit_middleware(request: Request, call_next):
 
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# ── დაცული API დოკუმენტაცია — production-ზე /docs და /redoc საჯარო აღარაა,
+# წვდომა მხოლოდ ?key=<DOCS_SECRET>-ით. secret env-ში (.env) DOCS_SECRET-ით
+# დგინდება; თუ არ არის დაყენებული, docs routes სრულად გამორთულია.
+from fastapi import Query as _Query
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.responses import JSONResponse as _JSONResponse
+from fastapi.openapi.utils import get_openapi as _get_openapi
+
+
+def _check_docs_secret(key: str | None):
+    if not settings.DOCS_SECRET or key != settings.DOCS_SECRET:
+        raise HTTPException(404, "Not Found")
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def _protected_openapi(key: str | None = _Query(None)):
+    _check_docs_secret(key)
+    return _JSONResponse(
+        _get_openapi(title=app.title, version=app.version, routes=app.routes)
+    )
+
+
+@app.get("/docs", include_in_schema=False)
+def _protected_swagger(key: str | None = _Query(None)):
+    _check_docs_secret(key)
+    return get_swagger_ui_html(openapi_url=f"/openapi.json?key={key}", title=app.title + " - Docs")
+
+
+@app.get("/redoc", include_in_schema=False)
+def _protected_redoc(key: str | None = _Query(None)):
+    _check_docs_secret(key)
+    return get_redoc_html(openapi_url=f"/openapi.json?key={key}", title=app.title + " - ReDoc")
 
 @app.get("/health")
 def health(request: Request):
