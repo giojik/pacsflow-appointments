@@ -163,7 +163,7 @@ def bulk_sync_users(tenant_id: str, db) -> dict:
         attributes=["sAMAccountName", config["attr_email"], config["attr_fullname"]],
     )
 
-    created, updated, skipped = 0, 0, 0
+    created, updated, skipped, conflicts = 0, 0, 0, 0
     for entry in conn.entries:
         if not hasattr(entry, "sAMAccountName") or not entry.sAMAccountName.value:
             skipped += 1
@@ -174,7 +174,10 @@ def bulk_sync_users(tenant_id: str, db) -> dict:
 
         user = db.query(User).filter(User.username == username, User.tenant_id == tenant_id).first()
         if not user:
-            user = User(
+            # username გლობალურად unique-ია (ყველა tenant-ს შორის) — თუ სხვა tenant-ს
+            # უკვე აქვს ეს username, ეს konkretuli insert ცალკე ვცადოთ და
+            # კონფლიქტისას მხოლოდ ეს ერთი user გამოვტოვოთ, არა მთელი batch.
+            new_user = User(
                 username=username,
                 email=email,
                 full_name=full_name,
@@ -184,19 +187,27 @@ def bulk_sync_users(tenant_id: str, db) -> dict:
                 hashed_password=None,
                 active=True,
             )
-            db.add(user)
-            created += 1
+            db.add(new_user)
+            try:
+                db.commit()
+                created += 1
+            except Exception:
+                db.rollback()
+                conflicts += 1
         elif user.auth_provider == AuthProvider.ldap:
             # role-ს არ ვეხებით — admin-ის ხელით მინიჭებული role უცვლელი რჩება
             user.email     = email or user.email
             user.full_name = full_name or user.full_name
+            db.commit()
             updated += 1
         else:
             # local auth_provider-ის user-ს იგივე username-ით არ ვეხებით (კონფლიქტის თავიდან ასაცილებლად)
             skipped += 1
 
-    db.commit()
-    return {"created": created, "updated": updated, "skipped": skipped, "total_found": len(conn.entries)}
+    return {
+        "created": created, "updated": updated, "skipped": skipped,
+        "username_conflicts": conflicts, "total_found": len(conn.entries),
+    }
 
 
 def run_ldap_sync_all_tenants():

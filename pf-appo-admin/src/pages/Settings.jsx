@@ -645,7 +645,7 @@ export default function Settings() {
                 border: `1px solid ${ldapSyncResult.ok ? "#1D9E75" : "#c0392b"}`,
               }}>
                 {ldapSyncResult.ok
-                  ? `✅ დასრულდა — ახალი: ${ldapSyncResult.created}, განახლებული: ${ldapSyncResult.updated}, გამოტოვებული: ${ldapSyncResult.skipped} (სულ ნაპოვნი: ${ldapSyncResult.total_found})`
+                  ? `✅ დასრულდა — ახალი: ${ldapSyncResult.created}, განახლებული: ${ldapSyncResult.updated}, გამოტოვებული: ${ldapSyncResult.skipped}${ldapSyncResult.username_conflicts ? `, username კონფლიქტი: ${ldapSyncResult.username_conflicts}` : ""} (სულ ნაპოვნი: ${ldapSyncResult.total_found})`
                   : `❌ შეცდომა: ${ldapSyncResult.message}`}
               </div>
             )}
