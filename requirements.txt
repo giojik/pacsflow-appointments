@@ -16,3 +16,4 @@ python-multipart>=0.0.9
 aiofiles>=23.0.0
 openpyxl
 apscheduler>=3.10.0
+ldap3>=2.9
