@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { loadBranding } from "../api/branding";
 import api from "../api";
+import FloatingChat from "./FloatingChat";
 
 function ImpersonationBanner() {
   const raw = localStorage.getItem("pf_impersonating");
@@ -287,6 +288,7 @@ export default function Layout() {
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "sans-serif", overflow: "hidden", position: "fixed", width: "100%" }}>
       <ImpersonationBanner />
+      <FloatingChat primaryColor={p} hidden={location.pathname === "/app/chat"} />
       {isMobile && sidebarOpen && (
         <div onClick={() => setSidebarOpen(false)}
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100 }} />

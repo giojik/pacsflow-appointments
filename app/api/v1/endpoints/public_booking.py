@@ -279,3 +279,26 @@ def public_contact(body: ContactCreate, request: Request, db: Session = Depends(
     _record_rate(ip)
 
     return {"success": True, "message": "თქვენი მოთხოვნა მიღებულია! მალე დაგიკავშირდებით."}
+
+# ── Tenant directory — საჯარო, ჩატის login dropdown-ისთვის ────────────────
+# აბრუნებს მხოლოდ active tenant-ების name + login base URL-ს (auth-მდე
+# საჭიროა ვიცოდეთ სად გავაგზავნოთ login request). არანაირი სენსიტიური
+# მონაცემი (users/stats და ა.შ.) აქ არ ბრუნდება — განსხვავებით
+# /platform/tenants-სგან, რომელიც მხოლოდ superadmin-ისთვისაა.
+APPOINTMENTS_BASE_DOMAIN = "https://appointment.pacsflow.ge"
+
+
+@router.get("/tenants-directory")
+def tenants_directory(db: Session = Depends(get_db)):
+    tenants = db.query(Tenant).filter(Tenant.active.is_(True)).order_by(Tenant.name.asc()).all()
+    result = []
+    for t in tenants:
+        domain = (t.domains or "").split(",")[0].strip()
+        if domain and not domain.endswith(".local"):
+            login_url = f"https://{domain}"
+        elif t.path_slug:
+            login_url = f"{APPOINTMENTS_BASE_DOMAIN}/b/{t.path_slug}"
+        else:
+            continue
+        result.append({"name": t.name, "login_url": login_url})
+    return result

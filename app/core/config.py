@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # JWT
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480   # 8 საათი
+    CHAT_JWT_SECRET: str = ""   # PacsFlow Chat-თან საერთო secret
 
     # Tenant
     TENANT_SLUG: str = "pacsflow"
