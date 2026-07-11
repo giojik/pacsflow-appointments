@@ -1,10 +1,10 @@
 """
 Active Directory / LDAP authentication service.
-LDAP_ENABLED=true .env-ში რომ გაააქტიუროთ.
+Multi-tenant: LDAP config თითოეული tenant-ისთვის ცალ-ცალკეა
+(tenant_settings.settings JSON-ში), არა გლობალური .env-ით.
 """
 from typing import Optional
 from dataclasses import dataclass
-from app.core.config import settings
 
 @dataclass
 class LDAPUser:
@@ -13,43 +13,70 @@ class LDAPUser:
     full_name: Optional[str]
     dn:        str
 
-def ldap_authenticate(username: str, password: str) -> Optional[LDAPUser]:
+
+def get_tenant_ldap_config(tenant_id: str, db) -> Optional[dict]:
+    """tenant_settings-დან LDAP config-ს კითხულობს კონკრეტული tenant-ისთვის.
+    დააბრუნებს None-ს თუ ldap_enabled არ არის true — ამ შემთხვევაში
+    login()-მა საერთოდ არ უნდა სცადოს LDAP fallback."""
+    import json
+    from sqlalchemy import text
+    row = db.execute(
+        text("SELECT settings FROM tenant_settings WHERE tenant_id = :tid"),
+        {"tid": tenant_id},
+    ).fetchone()
+    if not row:
+        return None
+    data = json.loads(row[0])
+    if not data.get("ldap_enabled"):
+        return None
+    return {
+        "server":         data.get("ldap_server", ""),
+        "port":           int(data.get("ldap_port", 389)),
+        "use_ssl":        bool(data.get("ldap_use_ssl", False)),
+        "bind_dn":        data.get("ldap_bind_dn", ""),
+        "bind_password":  data.get("ldap_bind_password", ""),
+        "search_base":    data.get("ldap_search_base", ""),
+        "user_filter":    data.get("ldap_user_filter", "(sAMAccountName={username})"),
+        "attr_email":     data.get("ldap_attr_email", "mail"),
+        "attr_fullname":  data.get("ldap_attr_fullname", "displayName"),
+        "default_role":   data.get("ldap_default_role", "viewer"),
+    }
+
+
+def ldap_authenticate(username: str, password: str, config: dict) -> Optional[LDAPUser]:
     """
-    AD-ში შესვლა — წარმატებისას LDAPUser, წარუმატებლობისას None.
+    AD-ში შესვლა კონკრეტული tenant-ის LDAP config-ით.
+    წარმატებისას LDAPUser, წარუმატებლობისას None.
     საჭიროა: pip install ldap3
     """
-    if not settings.LDAP_ENABLED:
-        return None
-
     try:
-        from ldap3 import Server, Connection, ALL, NTLM, SUBTREE
-        from ldap3.core.exceptions import LDAPBindError, LDAPException
+        from ldap3 import Server, Connection, ALL, SUBTREE
     except ImportError:
         raise RuntimeError("ldap3 არ არის დაინსტალირებული. დაამატე requirements.txt-ში")
 
     try:
         server = Server(
-            settings.LDAP_SERVER,
-            port=settings.LDAP_PORT,
-            use_ssl=settings.LDAP_USE_SSL,
+            config["server"],
+            port=config["port"],
+            use_ssl=config["use_ssl"],
             get_info=ALL,
         )
 
         # Step 1: service account-ით ვუერთდებით და ვეძებთ user-ს
         with Connection(
             server,
-            user=settings.LDAP_BIND_DN,
-            password=settings.LDAP_BIND_PASSWORD,
+            user=config["bind_dn"],
+            password=config["bind_password"],
             auto_bind=True,
         ) as conn:
-            user_filter = settings.LDAP_USER_FILTER.format(username=username)
+            user_filter = config["user_filter"].format(username=username)
             conn.search(
-                search_base=settings.LDAP_SEARCH_BASE,
+                search_base=config["search_base"],
                 search_filter=user_filter,
                 search_scope=SUBTREE,
                 attributes=[
-                    settings.LDAP_ATTR_EMAIL,
-                    settings.LDAP_ATTR_FULLNAME,
+                    config["attr_email"],
+                    config["attr_fullname"],
                     "sAMAccountName",
                     "distinguishedName",
                 ],
@@ -64,8 +91,8 @@ def ldap_authenticate(username: str, password: str) -> Optional[LDAPUser]:
         with Connection(server, user=user_dn, password=password, auto_bind=True):
             return LDAPUser(
                 username=username,
-                email=getattr(entry, settings.LDAP_ATTR_EMAIL).value if hasattr(entry, settings.LDAP_ATTR_EMAIL) else None,
-                full_name=getattr(entry, settings.LDAP_ATTR_FULLNAME).value if hasattr(entry, settings.LDAP_ATTR_FULLNAME) else None,
+                email=getattr(entry, config["attr_email"]).value if hasattr(entry, config["attr_email"]) else None,
+                full_name=getattr(entry, config["attr_fullname"]).value if hasattr(entry, config["attr_fullname"]) else None,
                 dn=user_dn,
             )
 
@@ -73,22 +100,24 @@ def ldap_authenticate(username: str, password: str) -> Optional[LDAPUser]:
         return None
 
 
-def sync_ldap_user(ldap_user: LDAPUser, db, tenant_id: str) -> "User":
+def sync_ldap_user(ldap_user: LDAPUser, db, tenant_id: str, default_role: str = "viewer") -> "User":
     """
     AD-ის მომხმარებელი DB-ში ქმნის ან განაახლებს.
-    Role-ს ხელით ანიჭებს admin — AD-იდან role არ მოდის.
+    Role-ს ხელით ანიჭებს (tenant-ის LDAP config-იდან) — AD-იდან role არ მოდის.
     """
     from app.models.user import User, UserRole, AuthProvider
-    from app.core.config import settings
 
-    user = db.query(User).filter(User.username == ldap_user.username).first()
+    user = db.query(User).filter(
+        User.username == ldap_user.username,
+        User.tenant_id == tenant_id,
+    ).first()
     if not user:
         user = User(
             username=ldap_user.username,
             email=ldap_user.email,
             full_name=ldap_user.full_name,
             tenant_id=tenant_id,
-            role=UserRole(settings.LDAP_DEFAULT_ROLE),
+            role=UserRole(default_role),
             auth_provider=AuthProvider.ldap,
             hashed_password=None,
         )

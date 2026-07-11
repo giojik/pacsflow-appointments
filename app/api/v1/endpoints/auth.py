@@ -101,6 +101,10 @@ def _check_domain_tenant_match(request: Request, user: User, db: Session) -> Non
 def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     check_brute_force(form.username)
 
+    from app.core.tenant import resolve_slug
+    domain_slug = resolve_slug(request, db)
+    domain_tenant = db.query(Tenant).filter(Tenant.slug == domain_slug).first()
+
     user = db.query(User).filter(
         User.username == form.username,
         User.auth_provider == AuthProvider.local,
@@ -111,14 +115,17 @@ def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: Ses
         _check_domain_tenant_match(request, user, db)
         record_success(form.username)
 
-    elif settings.LDAP_ENABLED:
-        from app.services.ldap_auth import ldap_authenticate, sync_ldap_user
-        ldap_user = ldap_authenticate(form.username, form.password)
+    elif domain_tenant:
+        from app.services.ldap_auth import ldap_authenticate, sync_ldap_user, get_tenant_ldap_config
+        ldap_config = get_tenant_ldap_config(domain_tenant.id, db)
+        if not ldap_config:
+            record_failed(form.username)
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
+        ldap_user = ldap_authenticate(form.username, form.password, ldap_config)
         if not ldap_user:
             record_failed(form.username)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
-        tenant = db.query(Tenant).filter(Tenant.slug == settings.TENANT_SLUG).first()
-        user = sync_ldap_user(ldap_user, db, tenant.id if tenant else None)
+        user = sync_ldap_user(ldap_user, db, domain_tenant.id, ldap_config["default_role"])
 
     else:
         record_failed(form.username)
