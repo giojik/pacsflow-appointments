@@ -104,12 +104,26 @@ def sync_ldap_user(ldap_user: LDAPUser, db, tenant_id: str, default_role: str = 
     """
     AD-ის მომხმარებელი DB-ში ქმნის ან განაახლებს.
     Role-ს ხელით ანიჭებს (tenant-ის LDAP config-იდან) — AD-იდან role არ მოდის.
+
+    უსაფრთხოება: თუ იგივე username-ით ამ tenant-ში უკვე არსებობს **local**
+    (auth_provider=local) ანგარიში, LDAP-ით შემოსვლა მას არასდროს "იტაცებს" —
+    თორემ ვინმეს, ვისაც მხოლოდ AD-ის (და არა PacsFlow-ის local) credentials
+    აქვს, შეეძლებოდა იმავე username-ის local admin-ის ანგარიშად შესვლა.
     """
     from app.models.user import User, UserRole, AuthProvider
+
+    local_conflict = db.query(User).filter(
+        User.username == ldap_user.username,
+        User.tenant_id == tenant_id,
+        User.auth_provider == AuthProvider.local,
+    ).first()
+    if local_conflict:
+        raise ValueError("username დაკავებულია local ანგარიშით")
 
     user = db.query(User).filter(
         User.username == ldap_user.username,
         User.tenant_id == tenant_id,
+        User.auth_provider == AuthProvider.ldap,
     ).first()
     if not user:
         user = User(

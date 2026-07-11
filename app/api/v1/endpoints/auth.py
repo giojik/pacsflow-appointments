@@ -125,7 +125,13 @@ def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: Ses
         if not ldap_user:
             record_failed(form.username)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
-        user = sync_ldap_user(ldap_user, db, domain_tenant.id, ldap_config["default_role"])
+        try:
+            user = sync_ldap_user(ldap_user, db, domain_tenant.id, ldap_config["default_role"])
+        except ValueError:
+            # username local ანგარიშითაა დაკავებული — ინფორმაციის გაჟონვის
+            # თავიდან ასაცილებლად ჩვეულებრივ 401-ს ვაბრუნებთ
+            record_failed(form.username)
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "მომხმარებელი ან პაროლი არასწორია")
 
     else:
         record_failed(form.username)
