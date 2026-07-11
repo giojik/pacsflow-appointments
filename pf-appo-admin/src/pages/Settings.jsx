@@ -235,6 +235,8 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [syncingLdap, setSyncingLdap] = useState(false);
+  const [ldapSyncResult, setLdapSyncResult] = useState(null);
 
   const inp = { padding: "8px 12px", borderRadius: 6, border: "1px solid #ddd", fontSize: 14, width: "100%", boxSizing: "border-box" };
 
@@ -256,6 +258,19 @@ export default function Settings() {
       alert("შეცდომა: " + err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const syncLdap = async () => {
+    setSyncingLdap(true);
+    setLdapSyncResult(null);
+    try {
+      const res = await api.post(`/auth/ldap-sync/${user.tenant_id}`);
+      setLdapSyncResult({ ok: true, ...res.data });
+    } catch (err) {
+      setLdapSyncResult({ ok: false, message: err.response?.data?.detail || err.message });
+    } finally {
+      setSyncingLdap(false);
     }
   };
 
@@ -605,6 +620,36 @@ export default function Settings() {
             </Field>
           </div>
           <Field label="SSL"><Toggle value={!!settings.ldap_use_ssl} onChange={v => set("ldap_use_ssl", v)} /></Field>
+
+          <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #eee" }}>
+            <button
+              onClick={syncLdap}
+              disabled={syncingLdap || !settings.ldap_enabled}
+              style={{
+                padding: "10px 20px", borderRadius: 6, border: "none",
+                background: syncingLdap ? "#ccc" : "#1D9E75", color: "#fff",
+                fontSize: 14, fontWeight: "bold", cursor: syncingLdap ? "default" : "pointer",
+              }}
+            >
+              {syncingLdap ? "სინქრონიზაცია მიმდინარეობს..." : "🔄 სინქრონიზაცია ახლავე"}
+            </button>
+            <div style={{ fontSize: 12, color: "#999", marginTop: 8 }}>
+              წამოიღებს ყველა user-ს Active Directory-დან (Search Base-ის მიხედვით) და დაამატებს/განაახლებს PacsFlow-ში.
+              არსებული user-ების role არ შეიცვლება.
+            </div>
+            {ldapSyncResult && (
+              <div style={{
+                marginTop: 12, padding: 12, borderRadius: 6, fontSize: 13,
+                background: ldapSyncResult.ok ? "#f0f9f5" : "#fdf0f0",
+                color: ldapSyncResult.ok ? "#1D9E75" : "#c0392b",
+                border: `1px solid ${ldapSyncResult.ok ? "#1D9E75" : "#c0392b"}`,
+              }}>
+                {ldapSyncResult.ok
+                  ? `✅ დასრულდა — ახალი: ${ldapSyncResult.created}, განახლებული: ${ldapSyncResult.updated}, გამოტოვებული: ${ldapSyncResult.skipped} (სულ ნაპოვნი: ${ldapSyncResult.total_found})`
+                  : `❌ შეცდომა: ${ldapSyncResult.message}`}
+              </div>
+            )}
+          </div>
         </div>
       );
 

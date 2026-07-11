@@ -197,3 +197,30 @@ def bulk_sync_users(tenant_id: str, db) -> dict:
 
     db.commit()
     return {"created": created, "updated": updated, "skipped": skipped, "total_found": len(conn.entries)}
+
+
+def run_ldap_sync_all_tenants():
+    """ყოველდღიური scheduled job — ყველა tenant-ს, ვისაც ldap_enabled=true აქვს, sync-ავს.
+    ერთი tenant-ის ხარვეზი (მაგ. AD ხელმიუწვდომელია) დანარჩენებს არ აჩერებს."""
+    import json
+    from app.db.session import SessionLocal
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("SELECT tenant_id, settings FROM tenant_settings")).fetchall()
+        for tenant_id, settings_json in rows:
+            try:
+                data = json.loads(settings_json)
+            except Exception:
+                continue
+            if not data.get("ldap_enabled"):
+                continue
+            try:
+                result = bulk_sync_users(tenant_id, db)
+                print(f"[ldap-sync] tenant={tenant_id}: {result}")
+            except Exception as e:
+                print(f"[ldap-sync] tenant={tenant_id} FAILED: {type(e).__name__}: {e}")
+                db.rollback()
+    finally:
+        db.close()

@@ -410,6 +410,9 @@ def on_startup():
 
     try:
         from app.services.reminder import start_scheduler
-        start_scheduler(hour=10, minute=0)
+        scheduler = start_scheduler(hour=10, minute=0)
+        from app.services.ldap_auth import run_ldap_sync_all_tenants
+        scheduler.add_job(run_ldap_sync_all_tenants, "cron", hour=3, minute=0, id="daily_ldap_sync", replace_existing=True)
+        print("[scheduler] LDAP sync job started — ყოველდღე 03:00")
     except Exception as e:
         print(f"[scheduler] start failed: {e}")
