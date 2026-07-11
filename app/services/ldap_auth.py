@@ -130,3 +130,70 @@ def sync_ldap_user(ldap_user: LDAPUser, db, tenant_id: str, default_role: str = 
     db.commit()
     db.refresh(user)
     return user
+
+
+def bulk_sync_users(tenant_id: str, db) -> dict:
+    """
+    ყველა AD user-ს search_base-დან წამოიღებს და sync-ავს — 'სინქრონიზაცია'
+    ღილაკისთვის, რომ admin-ს არ სჭირდებოდეს თითოეული user-ის login-ის ლოდინი.
+    დისკის/computer ანგარიშებს (objectCategory=person-ის გარეშე) და
+    გათიშულ ანგარიშებს (userAccountControl-ის disabled bit) გამორიცხავს.
+    """
+    from ldap3 import Server, Connection, ALL, SUBTREE
+    from app.models.user import User, UserRole, AuthProvider
+
+    config = get_tenant_ldap_config(tenant_id, db)
+    if not config:
+        raise ValueError("LDAP ამ tenant-ისთვის გამორთულია ან კონფიგურირებული არაა")
+
+    server = Server(config["server"], port=config["port"], use_ssl=config["use_ssl"], get_info=ALL)
+    conn = Connection(
+        server,
+        user=config["bind_dn"],
+        password=config["bind_password"],
+        auto_bind=True,
+    )
+
+    # objectCategory=person + userAccountControl-ის disabled bit (2) გამორთვა —
+    # რომ computer/service ანგარიშები (INNOVA-AD$ და მსგ.) და გათიშული user-ები არ შემოვიდეს
+    conn.search(
+        search_base=config["search_base"],
+        search_filter="(&(objectCategory=person)(objectClass=user)(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+        search_scope=SUBTREE,
+        attributes=["sAMAccountName", config["attr_email"], config["attr_fullname"]],
+    )
+
+    created, updated, skipped = 0, 0, 0
+    for entry in conn.entries:
+        if not hasattr(entry, "sAMAccountName") or not entry.sAMAccountName.value:
+            skipped += 1
+            continue
+        username = str(entry.sAMAccountName.value)
+        email = str(getattr(entry, config["attr_email"]).value) if hasattr(entry, config["attr_email"]) and entry[config["attr_email"]] else None
+        full_name = str(getattr(entry, config["attr_fullname"]).value) if hasattr(entry, config["attr_fullname"]) and entry[config["attr_fullname"]] else None
+
+        user = db.query(User).filter(User.username == username, User.tenant_id == tenant_id).first()
+        if not user:
+            user = User(
+                username=username,
+                email=email,
+                full_name=full_name,
+                tenant_id=tenant_id,
+                role=UserRole(config["default_role"]),
+                auth_provider=AuthProvider.ldap,
+                hashed_password=None,
+                active=True,
+            )
+            db.add(user)
+            created += 1
+        elif user.auth_provider == AuthProvider.ldap:
+            # role-ს არ ვეხებით — admin-ის ხელით მინიჭებული role უცვლელი რჩება
+            user.email     = email or user.email
+            user.full_name = full_name or user.full_name
+            updated += 1
+        else:
+            # local auth_provider-ის user-ს იგივე username-ით არ ვეხებით (კონფლიქტის თავიდან ასაცილებლად)
+            skipped += 1
+
+    db.commit()
+    return {"created": created, "updated": updated, "skipped": skipped, "total_found": len(conn.entries)}

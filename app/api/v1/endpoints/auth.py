@@ -148,6 +148,27 @@ def me(current_user: User = Depends(get_current_active_user)):
     return current_user
 
 # ── user management ───────────────────────────────────────────────────────
+@router.post("/ldap-sync/{tenant_id}")
+def ldap_sync(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """ყველა AD user-ს search_base-დან წამოიღებს — admin-ის 'სინქრონიზაცია' ღილაკისთვის."""
+    if current_user.role not in (UserRole.admin, UserRole.superadmin):
+        raise HTTPException(403, "მხოლოდ admin-ს შეუძლია LDAP სინქრონიზაცია")
+    require_tenant_access(tenant_id, current_user)
+
+    from app.services.ldap_auth import bulk_sync_users
+    try:
+        result = bulk_sync_users(tenant_id, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"LDAP სერვერთან დაკავშირება ვერ მოხერხდა: {type(e).__name__}")
+    return result
+
+
 @router.get("/users", response_model=list[UserOut])
 def list_users(
     tenant_id: str | None = None,
